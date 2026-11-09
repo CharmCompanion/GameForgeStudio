@@ -1,0 +1,13 @@
+# Python / PyInstaller build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.build/
+.build-env/
+*.spec
+*.tmp
+*.bak
+
+# Ignore intermediate variants in Release, only track the final GameForgeStudio.exe
+Release/*
+!Release/GameForgeStudio.exe
