@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 .build/
 .build-env/
+Output/
 *.spec
 *.tmp
 *.bak

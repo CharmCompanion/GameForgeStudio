@@ -1,7 +1,7 @@
 """
 GameForge Studio — Professional Windows Desktop Application
 Obsidian Glass Slate UI • Multi-Agent Game Development Control Center
-Streaming • Attachments • Autonomous Tool Execution • Live Usage Tracking • Recovery Center
+Streaming • Attachments • Autonomous Tool Execution • Intelligent Auto-Routing • Recovery Center
 """
 
 import os
@@ -22,6 +22,9 @@ import urllib.error
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk
+
+APP_VERSION = "1.0.0"
+APP_TITLE = f"GameForge Studio v{APP_VERSION} • Obsidian Glass Slate"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # WINDOWS 11 DWM THEME & STYLING
@@ -137,7 +140,6 @@ def dark_dialog(title, message='', mode='info'):
         entry.focus_set()
 
     if mode == 'folder':
-        # Drive selector pills
         drives_frame = tk.Frame(content_frame, bg='#0d131a')
         drives_frame.pack(fill='x', pady=(0, 6))
         tk.Label(drives_frame, text='Drives:', font=('Segoe UI', 9, 'bold'),
@@ -295,10 +297,10 @@ def detect_project_type(folder_path):
 
     uprojects = list(folder.glob('*.uproject'))
     if uprojects:
-        return {'engine': 'Unreal Engine', 'file': uprojects[0].name, 'badge': 'UE5'}
+        return {'engine': 'Unreal Engine', 'file': uprojects[0].name, 'badge': 'UE5', 'uproject': str(uprojects[0])}
 
     if (folder / 'project.godot').exists():
-        return {'engine': 'Godot Engine', 'file': 'project.godot', 'badge': 'GODOT'}
+        return {'engine': 'Godot Engine', 'file': 'project.godot', 'badge': 'GODOT', 'godot_file': str(folder / 'project.godot')}
 
     if (folder / 'ProjectSettings' / 'ProjectVersion.txt').exists():
         return {'engine': 'Unity Engine', 'file': 'ProjectSettings', 'badge': 'UNITY'}
@@ -312,7 +314,7 @@ def detect_project_type(folder_path):
 
     blends = list(folder.glob('*.blend'))
     if blends:
-        return {'engine': 'Blender Asset', 'file': blends[0].name, 'badge': '3D'}
+        return {'engine': 'Blender Asset', 'file': blends[0].name, 'badge': '3D', 'blend_file': str(blends[0])}
 
     if (folder / 'package.json').exists():
         return {'engine': 'Web / Node.js', 'file': 'package.json', 'badge': 'WEB'}
@@ -402,15 +404,23 @@ class Store:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.path = self.root / 'settings.json'
+        
+        # Discover existing keys from environment if not yet configured
+        gemini_env = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_GENERATIVE_AI_API_KEY') or ''
+        openai_env = os.environ.get('OPENAI_API_KEY') or ''
+        anthropic_env = os.environ.get('ANTHROPIC_API_KEY') or ''
+        fal_env = os.environ.get('FAL_KEY') or ''
+
         default_state = {
             'projects': [],
             'providers': {
                 'ollama': {'name': 'Ollama (Local)', 'base_url': 'http://127.0.0.1:11434', 'api_key': '', 'model': 'llama3', 'enabled': True},
-                'openai': {'name': 'OpenAI Compatible', 'base_url': 'https://api.openai.com/v1', 'api_key': '', 'model': 'gpt-4o', 'enabled': False},
-                'anthropic': {'name': 'Anthropic (Claude)', 'base_url': 'https://api.anthropic.com/v1', 'api_key': '', 'model': 'claude-3-5-sonnet-20241022', 'enabled': False},
-                'gemini': {'name': 'Google Gemini', 'base_url': 'https://generativelanguage.googleapis.com/v1beta', 'api_key': '', 'model': 'gemini-1.5-pro', 'enabled': False}
+                'gemini': {'name': 'Google Gemini', 'base_url': 'https://generativelanguage.googleapis.com/v1beta', 'api_key': gemini_env, 'model': 'gemini-1.5-pro', 'enabled': bool(gemini_env)},
+                'anthropic': {'name': 'Anthropic (Claude)', 'base_url': 'https://api.anthropic.com/v1', 'api_key': anthropic_env, 'model': 'claude-3-5-sonnet-20241022', 'enabled': bool(anthropic_env)},
+                'openai': {'name': 'OpenAI Compatible', 'base_url': 'https://api.openai.com/v1', 'api_key': openai_env, 'model': 'gpt-4o', 'enabled': bool(openai_env)},
+                'fal': {'name': 'Fal.ai (Media & 3D)', 'base_url': 'https://fal.run', 'api_key': fal_env, 'model': 'flux-pro', 'enabled': bool(fal_env)}
             },
-            'active_provider': 'ollama',
+            'active_provider': 'auto',  # 'auto' = intelligent dynamic routing
             'setup': False,
             'master_list': 'D:\\DEVELOPMENT\\MASTER_PROJECTS.md',
             'agent_sources': [
@@ -437,11 +447,10 @@ class Store:
         if self.path.exists():
             try:
                 self.data = json.loads(self.path.read_text(encoding='utf-8'))
-                # Upgrade schema if needed
                 if 'providers' not in self.data or isinstance(self.data['providers'], list):
                     self.data['providers'] = default_state['providers']
                 if 'active_provider' not in self.data:
-                    self.data['active_provider'] = 'ollama'
+                    self.data['active_provider'] = 'auto'
                 if 'team_ai' not in self.data:
                     self.data['team_ai'] = default_state['team_ai']
                 if 'metrics' not in self.data:
@@ -471,12 +480,150 @@ class Store:
                 'badge': project_info.get('badge', 'PRJ'),
                 'access': 'Ask before edits',
                 'chats': [{'title': 'General', 'messages': []}],
+                'tasks': [
+                    {'title': 'Initialize repository & game bible', 'done': True},
+                    {'title': 'Draft core loop mechanics & architecture', 'done': False},
+                    {'title': 'Build initial prototype scene / vertical slice', 'done': False}
+                ],
                 'created_at': datetime.datetime.now().isoformat()
             }
             self.data['projects'].append(record)
             self.save()
             return record
         return existing
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INTELLIGENT TASK-BASED AUTO-ROUTER
+# ─────────────────────────────────────────────────────────────────────────────
+
+def auto_route_request(prompt, attachments, providers):
+    """
+    Intelligently analyzes the prompt content, attachments, and active providers
+    to automatically select the best model without requiring manual switching.
+    
+    Returns: (provider_key, model_name, reason_description)
+    """
+    has_images = any(Path(p).suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp', '.bmp') for p in attachments)
+    prompt_lower = prompt.lower()
+
+    # Rule 1: Visual, Concept Art, Video Reference, or 3D Turnaround Analysis
+    is_visual = has_images or any(w in prompt_lower for w in [
+        'concept', 'art', 'screenshot', 'reference video', 'look like', 'character sheet',
+        'turnaround', 'tripo', 'texture', 'render', 'camera angle', 'visuals', 'mood'
+    ])
+
+    if is_visual:
+        if providers.get('gemini', {}).get('api_key'):
+            return ('gemini', providers['gemini'].get('model', 'gemini-1.5-pro'),
+                    'Auto-routed to Gemini 1.5 Pro (Multimodal Vision & Concept Analysis)')
+        elif providers.get('openai', {}).get('api_key'):
+            return ('openai', providers['openai'].get('model', 'gpt-4o'),
+                    'Auto-routed to GPT-4o (Visual & Turnaround Synthesis)')
+        elif providers.get('anthropic', {}).get('api_key'):
+            return ('anthropic', providers['anthropic'].get('model', 'claude-3-5-sonnet-20241022'),
+                    'Auto-routed to Claude 3.5 Sonnet (Visual Reference)')
+        else:
+            return ('ollama', providers.get('ollama', {}).get('model', 'llama3'),
+                    'Auto-routed to Local Model (Visual references handled via text fallback)')
+
+    # Rule 2: Deep Architecture, Game Logic, Physics, State Machines, Shaders
+    is_complex_logic = len(prompt) > 500 or any(w in prompt_lower for w in [
+        'architecture', 'state machine', 'physics', 'refactor', 'shader', 'algorithm',
+        'inventory', 'multiplayer', 'combat system', 'game loop', 'dialogue system', 'cloth physics'
+    ])
+
+    if is_complex_logic:
+        if providers.get('anthropic', {}).get('api_key'):
+            return ('anthropic', providers['anthropic'].get('model', 'claude-3-5-sonnet-20241022'),
+                    'Auto-routed to Claude 3.5 Sonnet (Advanced Game Logic & Architecture)')
+        elif providers.get('openai', {}).get('api_key'):
+            return ('openai', providers['openai'].get('model', 'gpt-4o'),
+                    'Auto-routed to GPT-4o (Complex Logic & Synthesis)')
+        elif providers.get('gemini', {}).get('api_key'):
+            return ('gemini', providers['gemini'].get('model', 'gemini-1.5-pro'),
+                    'Auto-routed to Gemini 1.5 Pro (Large-Context Systems Design)')
+        else:
+            return ('ollama', providers.get('ollama', {}).get('model', 'llama3'),
+                    'Auto-routed to Local Ollama (Local Engine Code)')
+
+    # Rule 3: Fast Iterative Bug Fixes, Syntax Checks, Offline Inquiries
+    is_bug_fix = any(w in prompt_lower for w in [
+        'bug', 'fix', 'error', 'null pointer', 'crash', 'syntax', 'typo', 'traceback',
+        'where is', 'list', 'check', 'inspect'
+    ])
+
+    # If user has a fast local Ollama or specifically asks for quick fix:
+    if is_bug_fix and providers.get('ollama', {}).get('enabled'):
+        return ('ollama', providers['ollama'].get('model', 'llama3'),
+                'Auto-routed to Local Ollama (Instant Zero-Cost Local Fix)')
+
+    # Default fallback to first verified provider
+    for p_key in ['anthropic', 'openai', 'gemini', 'ollama']:
+        cfg = providers.get(p_key, {})
+        if (cfg.get('api_key') or p_key == 'ollama') and cfg.get('enabled', True):
+            return (p_key, cfg.get('model', 'llama3'), f"Auto-routed to {cfg.get('name', p_key.upper())}")
+
+    return ('ollama', 'llama3', 'Auto-routed to Local Ollama (Default)')
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LIVE PROVIDER VERIFICATION / AUTH TESTERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def verify_provider_auth(provider_key, base_url, api_key):
+    """Makes a live lightweight request to test authentication and reachability."""
+    try:
+        base = base_url.rstrip('/')
+        if provider_key == 'ollama':
+            with urllib.request.urlopen(f"{base}/api/tags", timeout=4) as r:
+                tags = json.load(r).get('models', [])
+                names = [m['name'] for m in tags]
+                return True, f"Connected to Ollama! Models: {', '.join(names[:4]) or 'None downloaded'}"
+        elif provider_key == 'gemini':
+            if not api_key:
+                return False, "API key is required"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+            with urllib.request.urlopen(url, timeout=5) as r:
+                return True, "✓ Authenticated & Connected to Google Gemini API"
+        elif provider_key == 'openai':
+            if not api_key:
+                return False, "API key is required"
+            req = urllib.request.Request(f"{base}/models", headers={'Authorization': f'Bearer {api_key}'})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return True, "✓ Authenticated & Connected to OpenAI API"
+        elif provider_key == 'anthropic':
+            if not api_key:
+                return False, "API key is required"
+            req = urllib.request.Request(
+                f"{base}/messages",
+                data=json.dumps({
+                    'model': 'claude-3-5-sonnet-20241022',
+                    'max_tokens': 1,
+                    'messages': [{'role': 'user', 'content': 'hi'}]
+                }).encode('utf-8'),
+                headers={
+                    'x-api-key': api_key,
+                    'anthropic-version': '2023-06-01',
+                    'Content-Type': 'application/json'
+                }
+            )
+            with urllib.request.urlopen(req, timeout=6) as r:
+                return True, "✓ Authenticated & Connected to Anthropic Claude API"
+        elif provider_key == 'fal':
+            if not api_key:
+                return False, "API key is required"
+            req = urllib.request.Request(
+                "https://rest.alpha.fal.ai/models",
+                headers={'Authorization': f'Key {api_key}'}
+            )
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return True, "✓ Authenticated & Connected to Fal.ai"
+        return True, "Connection verified"
+    except urllib.error.HTTPError as he:
+        return False, f"Auth Error ({he.code}): {he.reason}"
+    except Exception as ex:
+        return False, f"Connection Failed: {str(ex)[:60]}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -660,7 +807,6 @@ def inspect_skills_compatibility(project_folder=None):
     if project_folder and Path(project_folder).is_dir():
         search_roots.append(Path(project_folder) / '.cursor' / 'skills')
         search_roots.append(Path(project_folder) / 'skills')
-    # Global skills
     global_skills = Path.home() / '.gemini' / 'config' / 'plugins' / 'science' / 'skills'
     if global_skills.exists():
         search_roots.append(global_skills)
@@ -676,7 +822,6 @@ def inspect_skills_compatibility(project_folder=None):
                 name = name_match.group(1).strip() if name_match else skill_md.parent.name
                 desc = desc_match.group(1).strip() if desc_match else 'Custom Agent Skill'
 
-                # Check common prerequisites
                 missing_deps = []
                 if 'git' in desc.lower() and not tools['git']['installed']:
                     missing_deps.append('git')
@@ -709,10 +854,18 @@ class Studio(tk.Tk):
 
     def __init__(self):
         super().__init__()
-        self.title('GameForge Studio • Obsidian Glass Slate')
+        self.title(APP_TITLE)
         self.geometry('1300x840')
         self.minsize(1040, 700)
         self.configure(bg='#070a0e')
+
+        # Load Icon
+        icon_path = Path(__file__).resolve().parent / 'app.ico'
+        if icon_path.exists():
+            try:
+                self.iconbitmap(str(icon_path))
+            except Exception:
+                pass
 
         self.store = Store()
         self.project = None
@@ -726,6 +879,9 @@ class Studio(tk.Tk):
 
         self._init_styles()
         dark_title(self)
+
+        # Status Bar at bottom
+        self._build_status_bar()
 
         # Main Layout Container
         self.shell = tk.Frame(self, bg='#070a0e')
@@ -767,12 +923,35 @@ class Studio(tk.Tk):
                         font=('Segoe UI', 9, 'bold'), relief='flat')
         rounded_buttons(self, style)
 
+    def _build_status_bar(self):
+        self.status_bar = tk.Frame(self, bg='#090d12', padx=14, pady=4, height=24)
+        self.status_bar.pack(side='bottom', fill='x')
+
+        self.sb_version = tk.Label(self.status_bar, text=f"GameForge Studio v{APP_VERSION} (Production)",
+                                   font=('Segoe UI', 8, 'bold'), bg='#090d12', fg='#60a5fa')
+        self.sb_version.pack(side='left')
+
+        self.sb_safety = tk.Label(self.status_bar, text="🛡️ Team AI: Strictly OPT-IN ($0.00 Cap)",
+                                  font=('Segoe UI', 8), bg='#090d12', fg='#22c55e')
+        self.sb_safety.pack(side='right', padx=(10, 0))
+
+        self.sb_provider = tk.Label(self.status_bar, text="Routing: 🤖 Auto-Route (Intelligent)",
+                                    font=('Segoe UI', 8), bg='#090d12', fg='#9db0c4')
+        self.sb_provider.pack(side='right', padx=(10, 0))
+
+    def _update_status_bar(self):
+        prov = self.store.data.get('active_provider', 'auto')
+        if prov == 'auto':
+            self.sb_provider.config(text="Routing: 🤖 Auto-Route (Smart Dispatch)")
+        else:
+            p_info = self.store.data.get('providers', {}).get(prov, {})
+            self.sb_provider.config(text=f"Provider: {p_info.get('name', prov.upper())}")
+
     def _build_sidebar(self):
         self.sidebar = tk.Frame(self.shell, bg='#0d131a', width=260, padx=12, pady=12)
         self.sidebar.pack(side='left', fill='y')
         self.sidebar.pack_propagate(False)
 
-        # Header with Collapse Button
         top_bar = tk.Frame(self.sidebar, bg='#0d131a')
         top_bar.pack(fill='x', pady=(0, 10))
         tk.Label(top_bar, text='GAMEFORGE', font=('Segoe UI', 13, 'bold'),
@@ -782,7 +961,6 @@ class Studio(tk.Tk):
                                  relief='flat', padx=8, pady=2, command=self.collapse_sidebar)
         collapse_btn.pack(side='right')
 
-        # Sidebar Action Buttons
         actions = [
             ('➕  New Project', self.create_dialog),
             ('📂  Import Folder', self.import_folder_dialog),
@@ -791,19 +969,19 @@ class Studio(tk.Tk):
             ('🤖  Pull from Agents', self.agent_sources_view),
             ('📝  Project Master List', self.master_list_view),
             ('🛡️  Recovery Center', self.recovery_center_view),
-            ('⚙️  Settings & Tools', self.settings_view),
+            ('⚙️  Settings & AI Keys', self.settings_view),
             ('🧙  Setup Wizard', self.setup_wizard),
+            ('ℹ️  About GameForge', self.about_dialog),
         ]
         for label, cmd in actions:
             btn = tk.Button(self.sidebar, text=label, font=('Segoe UI', 9),
                             anchor='w', bg='#141c26', fg='#c2d0df',
                             activebackground='#202c3b', activeforeground='#ffffff',
-                            relief='flat', padx=10, pady=5,
+                            relief='flat', padx=10, pady=4,
                             command=lambda cmd=cmd: self.safe_action(cmd))
             btn.pack(fill='x', pady=2)
 
-        # Search / Filter Bar
-        search_frame = tk.Frame(self.sidebar, bg='#0d131a', pady=10)
+        search_frame = tk.Frame(self.sidebar, bg='#0d131a', pady=8)
         search_frame.pack(fill='x')
         tk.Label(search_frame, text='PROJECTS', font=('Segoe UI', 9, 'bold'),
                  bg='#0d131a', fg='#64748b').pack(anchor='w', pady=(0, 4))
@@ -815,7 +993,6 @@ class Studio(tk.Tk):
                                 highlightbackground='#26374a')
         search_entry.pack(fill='x', ipady=4)
 
-        # Scrollable Projects List
         self.projects_scroll = tk.Frame(self.sidebar, bg='#0d131a')
         self.projects_scroll.pack(fill='both', expand=True)
 
@@ -853,6 +1030,7 @@ class Studio(tk.Tk):
 
     def refresh(self):
         self.render_projects_list()
+        self._update_status_bar()
 
     def render_projects_list(self):
         for child in self.projects_scroll.winfo_children():
@@ -918,6 +1096,7 @@ class Studio(tk.Tk):
             ('Workspace', self._tab_workspace),
             ('Chat & Agents', self._tab_chat),
             ('Agents & Approvals', self._tab_agents_approvals),
+            ('Tasks & Roadmap', self._tab_tasks),
             ('Game Bible', self._tab_game_bible),
             ('Changes', self._tab_changes),
             ('Connect', self._tab_connect),
@@ -935,7 +1114,7 @@ class Studio(tk.Tk):
         # Synopsis Card
         tk.Label(container, text='Project Synopsis & Vision', font=('Segoe UI', 11, 'bold'),
                  bg='#0e141c', fg='#60a5fa').pack(anchor='w')
-        synopsis_box = tk.Text(container, height=6, bg='#141c26', fg='#e2eaf4',
+        synopsis_box = tk.Text(container, height=5, bg='#141c26', fg='#e2eaf4',
                                insertbackground='#60a5fa', relief='flat', font=('Segoe UI', 10),
                                wrap='word', padx=10, pady=8)
         synopsis_box.insert('1.0', self.project.get('synopsis', ''))
@@ -949,17 +1128,60 @@ class Studio(tk.Tk):
         save_btn = tk.Button(container, text='💾 Save Synopsis', font=('Segoe UI', 9, 'bold'),
                              bg='#2b3e55', fg='#e2eaf4', relief='flat', padx=12, pady=5,
                              command=save_synopsis)
-        save_btn.pack(anchor='w', pady=(0, 16))
+        save_btn.pack(anchor='w', pady=(0, 14))
+
+        # Launch in External Engine / Editor Section
+        tk.Label(container, text='Launch in Engine & Editors', font=('Segoe UI', 11, 'bold'),
+                 bg='#0e141c', fg='#60a5fa').pack(anchor='w', pady=(0, 6))
+
+        launch_bar = tk.Frame(container, bg='#0e141c')
+        launch_bar.pack(fill='x', pady=(0, 14))
+
+        tools = detect_tools()
+
+        def launch_external(tool_key, arg=None):
+            tool_path = tools.get(tool_key, {}).get('path')
+            if not tool_path or not Path(tool_path).exists():
+                raise FileNotFoundError(f"{tool_key.upper()} executable is not found on your system.")
+            target = arg or self.project['path']
+            subprocess.Popen([tool_path, target], creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            messagebox.showinfo('Launched', f"Launched {tool_key.upper()} with {target}")
+
+        pinfo = detect_project_type(self.project['path'])
+        if pinfo.get('engine') == 'Godot Engine' and tools['godot']['installed']:
+            tk.Button(launch_bar, text='🎮 Open in Godot Editor', font=('Segoe UI', 9, 'bold'),
+                      bg='#1f2d3d', fg='#38bdf8', relief='flat', padx=12, pady=5,
+                      command=lambda: self.safe_action(lambda: launch_external('godot'))).pack(side='left', padx=(0, 6))
+
+        if pinfo.get('engine') == 'Unreal Engine' and tools['unreal']['installed'] and pinfo.get('uproject'):
+            tk.Button(launch_bar, text='⚔️ Open in Unreal Editor', font=('Segoe UI', 9, 'bold'),
+                      bg='#1f2d3d', fg='#38bdf8', relief='flat', padx=12, pady=5,
+                      command=lambda: self.safe_action(lambda: launch_external('unreal', pinfo['uproject']))).pack(side='left', padx=(0, 6))
+
+        if pinfo.get('engine') == 'Blender Asset' and tools['blender']['installed'] and pinfo.get('blend_file'):
+            tk.Button(launch_bar, text='🎨 Open in Blender', font=('Segoe UI', 9, 'bold'),
+                      bg='#1f2d3d', fg='#f59e0b', relief='flat', padx=12, pady=5,
+                      command=lambda: self.safe_action(lambda: launch_external('blender', pinfo['blend_file']))).pack(side='left', padx=(0, 6))
+
+        if tools['cursor']['installed']:
+            tk.Button(launch_bar, text='💻 Open in Cursor', font=('Segoe UI', 9),
+                      bg='#182330', fg='#c2d0df', relief='flat', padx=12, pady=5,
+                      command=lambda: self.safe_action(lambda: launch_external('cursor'))).pack(side='left', padx=(0, 6))
+
+        if tools['code']['installed']:
+            tk.Button(launch_bar, text='📝 Open in VS Code', font=('Segoe UI', 9),
+                      bg='#182330', fg='#c2d0df', relief='flat', padx=12, pady=5,
+                      command=lambda: self.safe_action(lambda: launch_external('code'))).pack(side='left', padx=(0, 6))
 
         # Quick Actions Grid
         tk.Label(container, text='Control Center Actions', font=('Segoe UI', 11, 'bold'),
-                 bg='#0e141c', fg='#60a5fa').pack(anchor='w', pady=(0, 8))
+                 bg='#0e141c', fg='#60a5fa').pack(anchor='w', pady=(0, 6))
         grid = tk.Frame(container, bg='#0e141c')
-        grid.pack(fill='x', pady=(0, 16))
+        grid.pack(fill='x', pady=(0, 14))
 
         action_buttons = [
-            ('📂 Open Folder', lambda: os.startfile(self.project['path'])),
-            ('🔍 Inspect Changes', self.view_git_changes),
+            ('📂 Open Folder in Explorer', lambda: os.startfile(self.project['path'])),
+            ('🔍 Inspect Git Changes', self.view_git_changes),
             ('🚀 Publish Commits', self.publish_git_commits),
             ('⬇️ Download Updates', self.download_git_updates),
             ('🔄 Fetch Status', self.sync_git_status),
@@ -973,7 +1195,7 @@ class Studio(tk.Tk):
             btn.grid(row=i // 4, column=i % 4, padx=4, pady=4, sticky='ew')
 
         # Project Stats & Git Info
-        stats_frame = tk.Frame(container, bg='#141c26', padx=14, pady=12)
+        stats_frame = tk.Frame(container, bg='#141c26', padx=14, pady=10)
         stats_frame.pack(fill='x')
         try:
             branch = git(self.project['path'], 'branch', '--show-current') or 'main'
@@ -1066,22 +1288,48 @@ class Studio(tk.Tk):
         top = tk.Frame(page, bg='#101822', padx=12, pady=8)
         top.pack(fill='x')
 
-        tk.Label(top, text='Provider:', font=('Segoe UI', 9, 'bold'),
+        tk.Label(top, text='Provider / Dispatch:', font=('Segoe UI', 9, 'bold'),
                  bg='#101822', fg='#7e91a6').pack(side='left', padx=(0, 4))
 
         providers = self.store.data.get('providers', {})
-        active_prov_key = tk.StringVar(value=self.store.data.get('active_provider', 'ollama'))
-        prov_names = {k: v['name'] for k, v in providers.items()}
+        active_prov_key = tk.StringVar(value=self.store.data.get('active_provider', 'auto'))
+        
+        # Available dispatch options
+        dispatch_options = ['auto'] + list(providers.keys())
+        dispatch_labels = {
+            'auto': '🤖 Auto-Route (Intelligent)',
+            'gemini': 'Google Gemini (1.5 Pro)',
+            'anthropic': 'Anthropic (Claude 3.5 Sonnet)',
+            'openai': 'OpenAI (GPT-4o)',
+            'ollama': 'Ollama (Local Offline)',
+            'fal': 'Fal.ai (Media & 3D)'
+        }
+        
         prov_combo = ttk.Combobox(top, textvariable=active_prov_key, state='readonly',
-                                  values=list(prov_names.keys()), width=16)
+                                  values=[dispatch_labels.get(k, k) for k in dispatch_options], width=26)
+        # Select current display label
+        prov_combo.set(dispatch_labels.get(active_prov_key.get(), '🤖 Auto-Route (Intelligent)'))
         prov_combo.pack(side='left')
 
-        tk.Label(top, text='Model:', font=('Segoe UI', 9, 'bold'),
+        tk.Label(top, text='Model Override:', font=('Segoe UI', 9, 'bold'),
                  bg='#101822', fg='#7e91a6').pack(side='left', padx=(10, 4))
-        model_var = tk.StringVar(value=providers.get(active_prov_key.get(), {}).get('model', 'llama3'))
+        model_var = tk.StringVar(value='(Automatic)' if active_prov_key.get() == 'auto' else providers.get(active_prov_key.get(), {}).get('model', ''))
         model_entry = tk.Entry(top, textvariable=model_var, width=16, bg='#16212e', fg='#e2eaf4',
                                relief='flat', highlightthickness=1, highlightbackground='#26374a')
         model_entry.pack(side='left')
+
+        def on_prov_change(e=None):
+            chosen_label = prov_combo.get()
+            chosen_key = next((k for k, v in dispatch_labels.items() if v == chosen_label), 'auto')
+            self.store.data['active_provider'] = chosen_key
+            if chosen_key == 'auto':
+                model_var.set('(Automatic)')
+            else:
+                model_var.set(self.store.data['providers'].get(chosen_key, {}).get('model', ''))
+            self.store.save()
+            self._update_status_bar()
+
+        prov_combo.bind('<<ComboboxSelected>>', on_prov_change)
 
         tk.Label(top, text='Access Mode:', font=('Segoe UI', 9, 'bold'),
                  bg='#101822', fg='#7e91a6').pack(side='left', padx=(10, 4))
@@ -1105,7 +1353,7 @@ class Studio(tk.Tk):
         hud_bar = tk.Frame(page, bg='#0a0e14', padx=12, pady=4)
         hud_bar.pack(fill='x')
 
-        status_indicator = tk.Label(hud_bar, text='🟢 Idle', font=('Segoe UI', 9, 'bold'),
+        status_indicator = tk.Label(hud_bar, text='🟢 Idle (Ready for Prompt)', font=('Segoe UI', 9, 'bold'),
                                     bg='#0a0e14', fg='#22c55e')
         status_indicator.pack(side='left')
 
@@ -1124,6 +1372,7 @@ class Studio(tk.Tk):
         transcript.tag_configure('user', foreground='#60a5fa', font=('Segoe UI', 10, 'bold'))
         transcript.tag_configure('assistant', foreground='#e2eaf4')
         transcript.tag_configure('tool', foreground='#f59e0b', font=('Consolas', 9))
+        transcript.tag_configure('router', foreground='#38bdf8', font=('Segoe UI', 8, 'italic'))
         transcript.tag_configure('meta', foreground='#64748b', font=('Segoe UI', 8))
 
         chats = project.setdefault('chats', [{'title': 'General', 'messages': []}])
@@ -1192,7 +1441,6 @@ class Studio(tk.Tk):
         def attach_files():
             files = filedialog.askdirectory('Select folder to attach files from')
             if files:
-                # Add directory or specific files
                 p = Path(files)
                 if p.is_dir():
                     for f in list(p.glob('*.*'))[:5]:
@@ -1208,7 +1456,7 @@ class Studio(tk.Tk):
         attach_btn.pack(side='right', padx=4)
 
         # ─────────────────────────────────────────────────────────────────────
-        # STREAMING EXECUTION LOGIC
+        # STREAMING & DISPATCH EXECUTION LOGIC
         # ─────────────────────────────────────────────────────────────────────
 
         def set_ui_busy(busy, status_text='Thinking...'):
@@ -1242,6 +1490,11 @@ class Studio(tk.Tk):
                     transcript.configure(state='disabled')
                 elif event_type == 'status':
                     status_indicator.config(text=payload.get('text', ''), fg=payload.get('color', '#60a5fa'))
+                elif event_type == 'router':
+                    transcript.configure(state='normal')
+                    transcript.insert('end', f"[{payload}]\n", 'router')
+                    transcript.see('end')
+                    transcript.configure(state='disabled')
                 elif event_type == 'metrics':
                     usage_label.config(text=payload)
                 elif event_type == 'tool_start':
@@ -1274,10 +1527,11 @@ class Studio(tk.Tk):
 
         def do_send():
             user_text = prompt_box.get('1.0', 'end-1c').strip()
-            chosen_model = model_var.get().strip()
-            active_prov = active_prov_key.get()
-            if not user_text or not chosen_model:
+            if not user_text:
                 return
+
+            chosen_prov_key = self.store.data.get('active_provider', 'auto')
+            manual_model = model_var.get().strip()
 
             # Package Attachments
             attachment_text = ''
@@ -1289,7 +1543,6 @@ class Studio(tk.Tk):
                         attachment_text += f"\n--- {att.name} ---\n{content_snip}\n--- END {att.name} ---\n"
                     except Exception:
                         pass
-                self.active_attachments.clear()
                 render_attachments_bar()
 
             full_prompt = user_text + attachment_text
@@ -1297,11 +1550,24 @@ class Studio(tk.Tk):
             prompt_box.delete('1.0', 'end')
             render_messages()
 
-            self.abort_event.clear()
-            set_ui_busy(True, 'Contacting AI Provider...')
+            # Intelligent Auto-Routing or Manual Selection
+            if chosen_prov_key == 'auto':
+                prov_key, resolved_model, route_reason = auto_route_request(
+                    full_prompt, self.active_attachments, self.store.data.get('providers', {})
+                )
+            else:
+                prov_key = chosen_prov_key
+                resolved_model = manual_model if manual_model and manual_model != '(Automatic)' else self.store.data['providers'].get(prov_key, {}).get('model', 'llama3')
+                route_reason = f"Manual override: {self.store.data['providers'].get(prov_key, {}).get('name', prov_key.upper())} ({resolved_model})"
 
-            # Append assistant header
+            self.active_attachments.clear()
+            render_attachments_bar()
+
+            self.abort_event.clear()
+            set_ui_busy(True, f"Connecting to {resolved_model}...")
+
             transcript.configure(state='normal')
+            transcript.insert('end', f"⚡ {route_reason}\n", 'router')
             transcript.insert('end', 'Agent Assistant:\n', 'assistant')
             transcript.configure(state='disabled')
 
@@ -1309,11 +1575,11 @@ class Studio(tk.Tk):
                 start_time = time.time()
                 accumulated_text = []
                 tokens_count = 0
-                provider_cfg = self.store.data['providers'].get(active_prov, {})
-                base_url = provider_cfg.get('base_url', 'http://127.0.0.1:11434').rstrip('/')
+                provider_cfg = self.store.data['providers'].get(prov_key, {})
+                base_url = provider_cfg.get('base_url', '').rstrip('/')
+                api_key = provider_cfg.get('api_key', '')
 
                 try:
-                    # Construct system prompt with tool capabilities
                     system_instructions = (
                         "You are GameForge Studio autonomous game engineering agent. "
                         "You can inspect project files and propose modifications. "
@@ -1333,10 +1599,10 @@ class Studio(tk.Tk):
                     for m in current_chat['messages']:
                         messages_payload.append({'role': m['role'], 'content': m['content']})
 
-                    # Streaming Request Handler
-                    if active_prov == 'ollama':
+                    # 1. Ollama local
+                    if prov_key == 'ollama':
                         req_data = json.dumps({
-                            'model': chosen_model,
+                            'model': resolved_model,
                             'messages': messages_payload,
                             'stream': True
                         }).encode('utf-8')
@@ -1344,11 +1610,43 @@ class Studio(tk.Tk):
                             f"{base_url}/api/chat", data=req_data,
                             headers={'Content-Type': 'application/json'}
                         )
-                    else:
-                        # OpenAI / Compatible SSE stream
-                        api_key = provider_cfg.get('api_key', '')
+                    # 2. Google Gemini
+                    elif prov_key == 'gemini':
+                        gemini_contents = []
+                        for m in current_chat['messages']:
+                            role_map = 'model' if m['role'] == 'assistant' else 'user'
+                            gemini_contents.append({'role': role_map, 'parts': [{'text': m['content']}]})
                         req_data = json.dumps({
-                            'model': chosen_model,
+                            'system_instruction': {'parts': [{'text': system_instructions}]},
+                            'contents': gemini_contents
+                        }).encode('utf-8')
+                        url = f"https://generativelanguage.googleapis.com/v1beta/models/{resolved_model}:streamGenerateContent?alt=sse&key={api_key}"
+                        req = urllib.request.Request(url, data=req_data, headers={'Content-Type': 'application/json'})
+
+                    # 3. Anthropic Claude
+                    elif prov_key == 'anthropic':
+                        anthropic_msgs = []
+                        for m in current_chat['messages']:
+                            anthropic_msgs.append({'role': m['role'], 'content': m['content']})
+                        req_data = json.dumps({
+                            'model': resolved_model,
+                            'system': system_instructions,
+                            'messages': anthropic_msgs,
+                            'max_tokens': 4096,
+                            'stream': True
+                        }).encode('utf-8')
+                        req = urllib.request.Request(
+                            f"{base_url}/messages", data=req_data,
+                            headers={
+                                'x-api-key': api_key,
+                                'anthropic-version': '2023-06-01',
+                                'Content-Type': 'application/json'
+                            }
+                        )
+                    # 4. OpenAI / Compatible
+                    else:
+                        req_data = json.dumps({
+                            'model': resolved_model,
                             'messages': messages_payload,
                             'stream': True
                         }).encode('utf-8')
@@ -1358,7 +1656,7 @@ class Studio(tk.Tk):
                         req = urllib.request.Request(f"{base_url}/chat/completions", data=req_data, headers=headers)
 
                     with urllib.request.urlopen(req, timeout=90) as response:
-                        self.stream_queue.put(('status', {'text': '🔵 Streaming tokens...', 'color': '#60a5fa'}))
+                        self.stream_queue.put(('status', {'text': f'🔵 Streaming from {resolved_model}...', 'color': '#60a5fa'}))
                         for raw_line in response:
                             if self.abort_event.is_set():
                                 break
@@ -1367,7 +1665,7 @@ class Studio(tk.Tk):
                                 continue
 
                             token = ''
-                            if active_prov == 'ollama':
+                            if prov_key == 'ollama':
                                 try:
                                     chunk = json.loads(line)
                                     token = chunk.get('message', {}).get('content', '')
@@ -1376,6 +1674,25 @@ class Studio(tk.Tk):
                                         tokens_count = eval_cnt
                                 except Exception:
                                     pass
+                            elif prov_key == 'gemini':
+                                if line.startswith('data: '):
+                                    try:
+                                        chunk = json.loads(line[6:])
+                                        candidates = chunk.get('candidates', [])
+                                        if candidates:
+                                            parts = candidates[0].get('content', {}).get('parts', [])
+                                            if parts:
+                                                token = parts[0].get('text', '')
+                                    except Exception:
+                                        pass
+                            elif prov_key == 'anthropic':
+                                if line.startswith('data: '):
+                                    try:
+                                        chunk = json.loads(line[6:])
+                                        if chunk.get('type') == 'content_block_delta':
+                                            token = chunk.get('delta', {}).get('text', '')
+                                    except Exception:
+                                        pass
                             else:
                                 if line.startswith('data: '):
                                     line_data = line[6:]
@@ -1392,7 +1709,6 @@ class Studio(tk.Tk):
                                 accumulated_text.append(token)
                                 self.stream_queue.put(('chunk', token))
 
-                                # Update metrics
                                 elapsed = max(0.1, time.time() - start_time)
                                 speed = tokens_count / elapsed
                                 self.stream_queue.put(('metrics', f"Tokens: {tokens_count} | Latency: {elapsed:.1f}s | Speed: {speed:.1f} tok/s"))
@@ -1408,7 +1724,6 @@ class Studio(tk.Tk):
                             args = call.get('args', {})
                             self.stream_queue.put(('tool_start', f"{tool_name} {args}"))
 
-                            # Execute tool in project sandbox
                             res = 'Tool execution failed'
                             if tool_name == 'read_file':
                                 res = ToolEngine.read_file(project['path'], args.get('path', ''))
@@ -1445,11 +1760,76 @@ class Studio(tk.Tk):
         send_btn.config(command=do_send)
 
     # ─────────────────────────────────────────────────────────────────────────
+    # TASKS & ROADMAP TAB
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _tab_tasks(self, page):
+        container = tk.Frame(page, bg='#070a0e', padx=16, pady=12)
+        container.pack(fill='both', expand=True)
+
+        tk.Label(container, text='Project Tasks & Milestone Roadmap', font=('Segoe UI', 12, 'bold'),
+                 bg='#070a0e', fg='#60a5fa').pack(anchor='w')
+        tk.Label(container, text='Track game features, mechanics, assets, and bug fixes.',
+                 font=('Segoe UI', 9), bg='#070a0e', fg='#7e91a6').pack(anchor='w', pady=(2, 10))
+
+        tasks = self.project.setdefault('tasks', [])
+
+        tasks_listbox = tk.Listbox(container, bg='#101822', fg='#e2eaf4', selectbackground='#2d425c',
+                                   font=('Segoe UI', 10), relief='flat', highlightthickness=1,
+                                   highlightbackground='#26374a')
+        tasks_listbox.pack(fill='both', expand=True, pady=6)
+
+        def refresh_tasks():
+            tasks_listbox.delete(0, 'end')
+            for t in tasks:
+                icon = '☑ [DONE]' if t.get('done') else '☐ [TODO]'
+                tasks_listbox.insert('end', f"{icon}  {t.get('title', '')}")
+
+        def toggle_task():
+            sel = tasks_listbox.curselection()
+            if not sel:
+                return
+            idx = sel[0]
+            tasks[idx]['done'] = not tasks[idx].get('done', False)
+            self.store.save()
+            refresh_tasks()
+
+        def add_task():
+            title = simpledialog.askstring('New Task', 'Task title or roadmap goal:')
+            if title:
+                tasks.append({'title': title.strip(), 'done': False})
+                self.store.save()
+                refresh_tasks()
+
+        def remove_task():
+            sel = tasks_listbox.curselection()
+            if not sel:
+                return
+            idx = sel[0]
+            del tasks[idx]
+            self.store.save()
+            refresh_tasks()
+
+        btn_bar = tk.Frame(container, bg='#070a0e')
+        btn_bar.pack(fill='x', pady=8)
+
+        tk.Button(btn_bar, text='➕ Add Task', font=('Segoe UI', 9, 'bold'),
+                  bg='#2b3e55', fg='#e2eaf4', relief='flat', padx=12, pady=5,
+                  command=lambda: self.safe_action(add_task)).pack(side='left', padx=(0, 6))
+        tk.Button(btn_bar, text='Toggle Status (Done/Todo)', font=('Segoe UI', 9),
+                  bg='#182330', fg='#c2d0df', relief='flat', padx=12, pady=5,
+                  command=lambda: self.safe_action(toggle_task)).pack(side='left', padx=6)
+        tk.Button(btn_bar, text='Remove Task', font=('Segoe UI', 9),
+                  bg='#16212e', fg='#ef4444', relief='flat', padx=10, pady=5,
+                  command=lambda: self.safe_action(remove_task)).pack(side='left', padx=6)
+
+        refresh_tasks()
+
+    # ─────────────────────────────────────────────────────────────────────────
     # AGENT ACTIVITY & APPROVAL CENTER
     # ─────────────────────────────────────────────────────────────────────────
 
     def _tab_agents_approvals(self, page):
-        """Unified Agent Activity & Approval Center with diff viewer and audit log."""
         container = tk.Frame(page, bg='#070a0e', padx=14, pady=12)
         container.pack(fill='both', expand=True)
 
@@ -1467,7 +1847,6 @@ class Studio(tk.Tk):
                   bg='#1b2736', fg='#c2d0df', relief='flat', padx=12, pady=5,
                   command=self.agent_sources_view).pack(side='left')
 
-        # Historical Edit Audit Table
         tk.Label(container, text='Audit Log (Applied Agent Edits)', font=('Segoe UI', 10, 'bold'),
                  bg='#070a0e', fg='#c2d0df').pack(anchor='w', pady=(8, 4))
 
@@ -1569,7 +1948,6 @@ class Studio(tk.Tk):
                   command=refresh_git).pack(anchor='w')
 
     def _tab_connect(self, page):
-        """GameForge Connect strictly opt-in team billing panel."""
         container = tk.Frame(page, bg='#070a0e', padx=18, pady=16)
         container.pack(fill='both', expand=True)
 
@@ -1619,7 +1997,6 @@ class Studio(tk.Tk):
     # ─────────────────────────────────────────────────────────────────────────
 
     def review_proposal_dialog(self):
-        """Interactive diff viewer for agent proposals with sha256 safety check."""
         if not self.project:
             return
         chats = self.project.get('chats', [])
@@ -1641,7 +2018,7 @@ class Studio(tk.Tk):
                     pass
 
         if not proposal or 'path' not in proposal or 'content' not in proposal:
-            raise ValueError('No valid file edit proposal found in the recent assistant responses.')
+            raise ValueError('No valid file edit proposal found in recent assistant responses.')
 
         relative = proposal['path']
         content = proposal['content']
@@ -1660,7 +2037,6 @@ class Studio(tk.Tk):
             fromfile=f"a/{relative}", tofile=f"b/{relative}"
         ))
 
-        # Diff Modal
         win = tk.Toplevel(self)
         win.title(f'Review Proposed Edit: {relative}')
         win.configure(bg='#070a0e')
@@ -1810,7 +2186,6 @@ class Studio(tk.Tk):
             reports = []
             timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-            # 1. Connected sources in settings
             for src in self.store.data.get('agent_sources', []):
                 p = Path(src)
                 if p.exists():
@@ -1822,7 +2197,6 @@ class Studio(tk.Tk):
                     except Exception as ex:
                         reports.append(f"SOURCE ERROR ({p}): {ex}")
 
-            # 2. Project local Cursor gaps if project is selected
             if self.project:
                 cursor_gap = Path(self.project['path']) / '.cursor' / 'LIVE_GAPS.md'
                 if cursor_gap.exists():
@@ -1889,7 +2263,6 @@ class Studio(tk.Tk):
             if not loaded_state['path']:
                 raise ValueError('No document currently connected')
             p = Path(loaded_state['path'])
-            # Outside change check
             if read_source(p) != loaded_state['text']:
                 raise ValueError('Document was modified outside GameForge Studio. Please reconnect or reload before saving.')
 
@@ -1922,7 +2295,6 @@ class Studio(tk.Tk):
             load_doc('D:/DEVELOPMENT/MASTER_PROJECTS.md')
 
     def batch_import_dialog(self):
-        """Discovers all games in MASTER_PROJECTS.md & PROJECTS.md and offers 1-click registration."""
         docs = []
         master = self.store.data.get('master_list', 'D:\\DEVELOPMENT\\MASTER_PROJECTS.md')
         if Path(master).exists():
@@ -1948,7 +2320,6 @@ class Studio(tk.Tk):
         tk.Label(top_f, text='Check existing projects to register in GameForge Studio without modifying any files.',
                  font=('Segoe UI', 9), bg='#0d131a', fg='#7e91a6').pack(anchor='w')
 
-        # Projects checklist table
         tree = ttk.Treeview(win, columns=('status', 'engine', 'path'), show='tree headings')
         tree.heading('#0', text='Project Name')
         tree.heading('status', text='Status')
@@ -1990,21 +2361,22 @@ class Studio(tk.Tk):
         win.grab_set()
 
     # ─────────────────────────────────────────────────────────────────────────
-    # FIRST-RUN SETUP WIZARD & SETTINGS
+    # FIRST-RUN SETUP WIZARD & AI LOGINS
     # ─────────────────────────────────────────────────────────────────────────
 
     def setup_wizard(self):
-        """Interactive 4-step wizard introducing tools, workspace, and safety invariants."""
+        """Interactive 4-step wizard introducing tools, AI sign-ins, and safety invariants."""
         win = tk.Toplevel(self)
-        win.title('Welcome to GameForge Studio Setup Wizard')
+        win.title('GameForge Studio Setup Wizard')
         win.configure(bg='#070a0e')
-        win.geometry('740x520')
+        win.geometry('780x560')
         win.transient(self)
 
         step = [0]
         tools = detect_tools()
+        providers = self.store.data.setdefault('providers', {})
 
-        body = tk.Frame(win, bg='#070a0e', padx=24, pady=20)
+        body = tk.Frame(win, bg='#070a0e', padx=24, pady=18)
         body.pack(fill='both', expand=True)
 
         def render_step():
@@ -2014,9 +2386,9 @@ class Studio(tk.Tk):
 
             if s == 0:
                 tk.Label(body, text='Step 1 of 4: Environment & Toolchains', font=('Segoe UI', 14, 'bold'),
-                         bg='#070a0e', fg='#60a5fa').pack(anchor='w', pady=(0, 6))
-                tk.Label(body, text='GameForge detected the following development tools and game engines on your Windows system:',
-                         font=('Segoe UI', 9), bg='#070a0e', fg='#9db0c4').pack(anchor='w', pady=(0, 14))
+                         bg='#070a0e', fg='#60a5fa').pack(anchor='w', pady=(0, 4))
+                tk.Label(body, text='GameForge detected the following developer toolchains and game engines on your Windows system:',
+                         font=('Segoe UI', 9), bg='#070a0e', fg='#9db0c4').pack(anchor='w', pady=(0, 12))
 
                 grid = tk.Frame(body, bg='#0f1620', padx=12, pady=10)
                 grid.pack(fill='both', expand=True)
@@ -2029,8 +2401,93 @@ class Studio(tk.Tk):
                              bg='#0f1620', fg=status_color).grid(row=i % 7, column=(i // 7) * 2 + 1, sticky='w', pady=2, padx=4)
 
             elif s == 1:
-                tk.Label(body, text='Step 2 of 4: Master Project Tracker', font=('Segoe UI', 14, 'bold'),
-                         bg='#070a0e', fg='#60a5fa').pack(anchor='w', pady=(0, 6))
+                # ── Step 2: AI Provider Sign-Ins & Authentication ──
+                tk.Label(body, text='Step 2 of 4: AI Provider Sign-Ins & Setup', font=('Segoe UI', 14, 'bold'),
+                         bg='#070a0e', fg='#60a5fa').pack(anchor='w', pady=(0, 4))
+                tk.Label(body, text='Connect the AI models you use. GameForge auto-switches between them depending on whether you need code, vision, or quick fixes:',
+                         font=('Segoe UI', 9), bg='#070a0e', fg='#9db0c4').pack(anchor='w', pady=(0, 10))
+
+                scroll_f = tk.Frame(body, bg='#070a0e')
+                scroll_f.pack(fill='both', expand=True)
+
+                provider_items = [
+                    ('gemini', 'Google Gemini', 'Multimodal vision, concept art analysis, 1M+ token context', True),
+                    ('anthropic', 'Anthropic Claude', 'Deep game architecture, state machines, physics, and complex refactors', True),
+                    ('openai', 'OpenAI (GPT-4o)', 'Character turnarounds, 3D specs, general reasoning', True),
+                    ('ollama', 'Local Ollama', 'Zero-cost offline iteration, instant syntax checks & quick bug fixes', False),
+                    ('fal', 'Fal.ai / Tripo 3D', 'Video reference generation (Flux) and 3D mesh modeling', True),
+                ]
+
+                for p_key, p_title, p_desc, needs_key in provider_items:
+                    card = tk.Frame(scroll_f, bg='#141c26', padx=10, pady=8, highlightthickness=1,
+                                    highlightbackground='#26374a')
+                    card.pack(fill='x', pady=3)
+
+                    top_row = tk.Frame(card, bg='#141c26')
+                    top_row.pack(fill='x')
+                    tk.Label(top_row, text=p_title, font=('Segoe UI', 10, 'bold'),
+                             bg='#141c26', fg='#e2eaf4').pack(side='left')
+                    tk.Label(top_row, text=f"• {p_desc}", font=('Segoe UI', 8),
+                             bg='#141c26', fg='#9db0c4').pack(side='left', padx=6)
+
+                    cfg = providers.setdefault(p_key, {})
+                    status_lbl = tk.Label(top_row, text='⚪ Not tested', font=('Segoe UI', 8, 'bold'),
+                                          bg='#141c26', fg='#7e91a6')
+                    status_lbl.pack(side='right')
+
+                    bot_row = tk.Frame(card, bg='#141c26')
+                    bot_row.pack(fill='x', pady=(4, 0))
+
+                    if needs_key:
+                        tk.Label(bot_row, text='API Key:', font=('Segoe UI', 8), bg='#141c26', fg='#7e91a6').pack(side='left')
+                        k_var = tk.StringVar(value=cfg.get('api_key', ''))
+                        k_entry = tk.Entry(bot_row, textvariable=k_var, width=38, show='•',
+                                           bg='#1b2736', fg='#e2eaf4', relief='flat')
+                        k_entry.pack(side='left', padx=6)
+
+                        def toggle_mask(ent=k_entry):
+                            ent.config(show='' if ent.cget('show') == '•' else '•')
+
+                        tk.Button(bot_row, text='👁', font=('Segoe UI', 7), bg='#1b2736', fg='#9db0c4',
+                                  relief='flat', padx=4, command=toggle_mask).pack(side='left', padx=(0, 6))
+
+                        def test_key(pk=p_key, kv=k_var, sl=status_lbl):
+                            k_val = kv.get().strip()
+                            providers[pk]['api_key'] = k_val
+                            b_url = providers[pk].get('base_url', '')
+                            ok, msg = verify_provider_auth(pk, b_url, k_val)
+                            if ok:
+                                sl.config(text='🟢 Connected & Verified', fg='#22c55e')
+                                providers[pk]['enabled'] = True
+                            else:
+                                sl.config(text=f'🔴 {msg}', fg='#ef4444')
+                            self.store.save()
+
+                        tk.Button(bot_row, text='Sign In / Verify', font=('Segoe UI', 8, 'bold'),
+                                  bg='#2b3e55', fg='#e2eaf4', relief='flat', padx=10, pady=2,
+                                  command=test_key).pack(side='left')
+
+                        # Auto-check if key already populated from environment
+                        if k_var.get():
+                            test_key(p_key, k_var, status_lbl)
+                    else:
+                        tk.Label(bot_row, text='Local URL: http://127.0.0.1:11434', font=('Segoe UI', 8),
+                                 bg='#141c26', fg='#9db0c4').pack(side='left')
+
+                        def test_ollama(pk=p_key, sl=status_lbl):
+                            b_url = providers[pk].get('base_url', 'http://127.0.0.1:11434')
+                            ok, msg = verify_provider_auth(pk, b_url, '')
+                            sl.config(text='🟢 Online' if ok else '⚪ Offline', fg='#22c55e' if ok else '#9db0c4')
+                            providers[pk]['enabled'] = ok
+                            self.store.save()
+
+                        tk.Button(bot_row, text='Check Service Status', font=('Segoe UI', 8),
+                                  bg='#1b2736', fg='#c2d0df', relief='flat', padx=10, pady=2,
+                                  command=test_ollama).pack(side='left', padx=8)
+
+            elif s == 2:
+                tk.Label(body, text='Step 3 of 4: Master Project Tracker', font=('Segoe UI', 14, 'bold'),
+                         bg='#070a0e', fg='#60a5fa').pack(anchor='w', pady=(0, 4))
                 tk.Label(body, text='Connect your central master project document to manage your game portfolio:',
                          font=('Segoe UI', 9), bg='#070a0e', fg='#9db0c4').pack(anchor='w', pady=(0, 14))
 
@@ -2044,28 +2501,9 @@ class Studio(tk.Tk):
                 tk.Label(box, text=detected_master, font=('Segoe UI', 10),
                          bg='#141c26', fg='#ffffff' if has_master else '#7e91a6').pack(anchor='w', pady=(4, 0))
 
-            elif s == 2:
-                tk.Label(body, text='Step 3 of 4: Multi-Agent Hub', font=('Segoe UI', 14, 'bold'),
-                         bg='#070a0e', fg='#60a5fa').pack(anchor='w', pady=(0, 6))
-                tk.Label(body, text='GameForge pulls status, task gaps, and updates from your local AI agents:',
-                         font=('Segoe UI', 9), bg='#070a0e', fg='#9db0c4').pack(anchor='w', pady=(0, 14))
-
-                agents_info = [
-                    ('Cursor Agent', 'Reads .cursor/LIVE_GAPS.md and .cursorrules for live progress tracking.'),
-                    ('Antigravity / Gemini', 'Accesses session transcripts, artifacts, and engineering logs.'),
-                    ('Local Ollama', 'Connects to http://127.0.0.1:11434 for offline private assistance.'),
-                ]
-                for title, desc in agents_info:
-                    card = tk.Frame(body, bg='#141c26', padx=12, pady=10)
-                    card.pack(fill='x', pady=4)
-                    tk.Label(card, text=f"🤖 {title}", font=('Segoe UI', 10, 'bold'),
-                             bg='#141c26', fg='#60a5fa').pack(anchor='w')
-                    tk.Label(card, text=desc, font=('Segoe UI', 9),
-                             bg='#141c26', fg='#9db0c4').pack(anchor='w')
-
             elif s == 3:
                 tk.Label(body, text='Step 4 of 4: Team AI Safety Invariant', font=('Segoe UI', 14, 'bold'),
-                         bg='#070a0e', fg='#22c55e').pack(anchor='w', pady=(0, 6))
+                         bg='#070a0e', fg='#22c55e').pack(anchor='w', pady=(0, 4))
                 tk.Label(body, text='Please review and confirm the GameForge Connect safety guarantee:',
                          font=('Segoe UI', 9), bg='#070a0e', fg='#9db0c4').pack(anchor='w', pady=(0, 14))
 
@@ -2096,7 +2534,7 @@ class Studio(tk.Tk):
                 self.store.data['setup'] = True
                 self.store.save()
                 win.destroy()
-                messagebox.showinfo('Setup Complete', 'GameForge Studio is configured and ready.')
+                messagebox.showinfo('Setup Complete', 'GameForge Studio is configured with your AI providers.')
 
         next_btn = tk.Button(btn_bar, text='Next Step ➤', font=('Segoe UI', 9, 'bold'),
                              bg='#2b3e55', fg='#e2eaf4', relief='flat', padx=16, pady=6,
@@ -2106,20 +2544,63 @@ class Studio(tk.Tk):
         dark_title(win)
         win.grab_set()
 
+    def about_dialog(self):
+        """Displays About GameForge Studio modal with links and release info."""
+        win = tk.Toplevel(self)
+        win.title('About GameForge Studio')
+        win.configure(bg='#070a0e')
+        win.geometry('580x420')
+        win.transient(self)
+
+        top_f = tk.Frame(win, bg='#0d131a', padx=20, pady=16)
+        top_f.pack(fill='x')
+        tk.Label(top_f, text='GameForge Studio', font=('Segoe UI', 16, 'bold'),
+                 bg='#0d131a', fg='#60a5fa').pack(anchor='w')
+        tk.Label(top_f, text=f"Version {APP_VERSION} (Production Release) • Obsidian Glass Slate",
+                 font=('Segoe UI', 9), bg='#0d131a', fg='#9db0c4').pack(anchor='w', pady=(2, 0))
+
+        content_f = tk.Frame(win, bg='#070a0e', padx=20, pady=14)
+        content_f.pack(fill='both', expand=True)
+
+        desc = (
+            "GameForge Studio is an agent-augmented desktop IDE for game developers.\n\n"
+            "• Auto-Routing Dispatcher: Automatically routes between Vision, Logic & Local AI\n"
+            "• Engine Integrations: Unreal Engine 5, Godot 4, Unity, ESP32-S3, Blender\n"
+            "• Autonomous Sandbox: Code inspection, live diff proposals, and atomic safety edits\n"
+            "• Multi-Agent Sync: Real-time Cursor, Antigravity, and master list tracking\n"
+            "• Recovery Center: Instant ZIP checkpoints, clean folder restores, and file rollbacks\n"
+            "• Connect Invariant: 100% Opt-in team AI spending with immediate kill switches\n\n"
+            "GitHub Repository: https://github.com/CharmCompanion/GameForgeStudio\n"
+            "Licensed under the MIT License. Copyright (c) 2026 CharmCompanion."
+        )
+        tk.Label(content_f, text=desc, font=('Segoe UI', 9), justify='left',
+                 bg='#070a0e', fg='#c2d0df').pack(anchor='w')
+
+        btn_bar = tk.Frame(win, bg='#070a0e', padx=20, pady=12)
+        btn_bar.pack(fill='x', side='bottom')
+        tk.Button(btn_bar, text='Close', font=('Segoe UI', 9, 'bold'),
+                  bg='#2b3e55', fg='#e2eaf4', relief='flat', padx=16, pady=6,
+                  command=win.destroy).pack(side='right')
+
+        dark_title(win)
+        win.grab_set()
+
     def settings_view(self):
-        self.clear_main('Settings & Extensions', 'Tool detection, AI provider configurations, rules, and skill compatibility.')
+        self.clear_main('Settings & AI Provider Keys', 'Tool detection, AI provider sign-ins, rules, and skill compatibility.')
 
         tabs = ttk.Notebook(self.main)
         tabs.pack(fill='both', expand=True)
 
         # Tab: AI Providers & Usage
         ai_frame = ttk.Frame(tabs)
-        tabs.add(ai_frame, text=' AI Providers & Usage ')
+        tabs.add(ai_frame, text=' AI Providers & Logins ')
         ai_box = tk.Frame(ai_frame, bg='#070a0e', padx=16, pady=14)
         ai_box.pack(fill='both', expand=True)
 
-        tk.Label(ai_box, text='Connected Providers Configuration', font=('Segoe UI', 11, 'bold'),
-                 bg='#070a0e', fg='#60a5fa').pack(anchor='w', pady=(0, 10))
+        tk.Label(ai_box, text='Connected Providers & API Keys', font=('Segoe UI', 11, 'bold'),
+                 bg='#070a0e', fg='#60a5fa').pack(anchor='w', pady=(0, 4))
+        tk.Label(ai_box, text='Configure credentials. GameForge auto-selects the best AI based on whether you are analyzing concept art, refactoring logic, or debugging.',
+                 font=('Segoe UI', 9), bg='#070a0e', fg='#9db0c4').pack(anchor='w', pady=(0, 10))
 
         prov_scroll = tk.Frame(ai_box, bg='#070a0e')
         prov_scroll.pack(fill='both', expand=True)
@@ -2136,36 +2617,32 @@ class Studio(tk.Tk):
             row = tk.Frame(card, bg='#141c26')
             row.pack(fill='x', pady=4)
 
-            tk.Label(row, text='Base URL:', font=('Segoe UI', 8), bg='#141c26', fg='#9db0c4').pack(side='left')
-            url_var = tk.StringVar(value=pinfo.get('base_url', ''))
-            url_ent = tk.Entry(row, textvariable=url_var, width=32, bg='#1b2736', fg='#e2eaf4', relief='flat')
-            url_ent.pack(side='left', padx=6)
+            tk.Label(row, text='API Key:', font=('Segoe UI', 8), bg='#141c26', fg='#9db0c4').pack(side='left')
+            k_var = tk.StringVar(value=pinfo.get('api_key', ''))
+            k_ent = tk.Entry(row, textvariable=k_var, width=28, show='•', bg='#1b2736', fg='#e2eaf4', relief='flat')
+            k_ent.pack(side='left', padx=4)
 
-            tk.Label(row, text='Default Model:', font=('Segoe UI', 8), bg='#141c26', fg='#9db0c4').pack(side='left', padx=(6, 0))
+            def toggle_k(ent=k_ent):
+                ent.config(show='' if ent.cget('show') == '•' else '•')
+            tk.Button(row, text='👁', font=('Segoe UI', 7), bg='#1b2736', fg='#9db0c4', relief='flat', command=toggle_k).pack(side='left', padx=(0, 6))
+
+            tk.Label(row, text='Model:', font=('Segoe UI', 8), bg='#141c26', fg='#9db0c4').pack(side='left', padx=(6, 0))
             mod_var = tk.StringVar(value=pinfo.get('model', ''))
             mod_ent = tk.Entry(row, textvariable=mod_var, width=18, bg='#1b2736', fg='#e2eaf4', relief='flat')
-            mod_ent.pack(side='left', padx=6)
+            mod_ent.pack(side='left', padx=4)
 
-            def test_conn(k=key, u_var=url_var, m_var=mod_var):
-                base = u_var.get().rstrip('/')
-                try:
-                    if k == 'ollama':
-                        with urllib.request.urlopen(f"{base}/api/tags", timeout=5) as r:
-                            tags = json.load(r).get('models', [])
-                            names = [m['name'] for m in tags]
-                            messagebox.showinfo('Connection OK', f"Connected to Ollama! Available models:\n{', '.join(names[:6])}")
-                    else:
-                        req = urllib.request.Request(f"{base}/models", timeout=5)
-                        api_k = providers[k].get('api_key', '')
-                        if api_k:
-                            req.add_header('Authorization', f"Bearer {api_k}")
-                        with urllib.request.urlopen(req) as r:
-                            messagebox.showinfo('Connection OK', f"Connected to {k.upper()} endpoint successfully.")
-                except Exception as ex:
-                    messagebox.showerror('Connection Test Failed', str(ex))
+            def test_conn(k=key, kv=k_var, mv=mod_var):
+                providers[k]['api_key'] = kv.get().strip()
+                providers[k]['model'] = mv.get().strip()
+                self.store.save()
+                ok, msg = verify_provider_auth(k, providers[k].get('base_url', ''), kv.get().strip())
+                if ok:
+                    messagebox.showinfo('Verified', f"{providers[k].get('name', k)}: {msg}")
+                else:
+                    messagebox.showerror('Verification Failed', f"{providers[k].get('name', k)}: {msg}")
 
-            tk.Button(row, text='Test Connection', font=('Segoe UI', 8), bg='#223245', fg='#c2d0df',
-                      relief='flat', padx=8, pady=2, command=test_conn).pack(side='right')
+            tk.Button(row, text='Verify / Save', font=('Segoe UI', 8, 'bold'), bg='#2b3e55', fg='#e2eaf4',
+                      relief='flat', padx=10, pady=2, command=test_conn).pack(side='right')
 
         # Tab: Installed Tools
         tools_frame = ttk.Frame(tabs)
