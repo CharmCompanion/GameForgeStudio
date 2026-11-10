@@ -2,7 +2,7 @@
 ; SEE THE DOCUMENTATION FOR DETAILS ON CREATING INNO SETUP SCRIPT FILES!
 
 #define MyAppName "GameForge Studio"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "CharmCompanion"
 #define MyAppURL "https://github.com/CharmCompanion/GameForgeStudio"
 #define MyAppExeName "GameForgeStudio.exe"
@@ -21,7 +21,7 @@ DisableProgramGroupPage=yes
 LicenseFile=LICENSE
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=Output
-OutputBaseFilename=GameForgeStudio-Setup-v1.0.0
+OutputBaseFilename=GameForgeStudio-Setup-v1.1.0
 SetupIconFile=app.ico
 Compression=lzma
 SolidCompression=yes
@@ -35,9 +35,12 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 Source: "Release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "viewport3d.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "app.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "CharmCompanion_GameForge.cer"; DestDir: "{app}"; Flags: ignoreversion
+Source: "Trust-Certificate.cmd"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\app.ico"

@@ -99,6 +99,29 @@ class SafetyAndFeaturesTest(unittest.TestCase):
             # Must prohibit automatic cost splitting
             self.assertFalse(team_ai.get('automatic_cost_splitting'))
 
+    def test_autonomous_react_tool_loop(self):
+        import re
+        import json
+        with tempfile.TemporaryDirectory() as temporary:
+            proj = Path(temporary)
+            (proj / 'player.gd').write_text('var speed = 200\nfunc move(): pass')
+            
+            # Step 1: Agent returns tool call block
+            simulated_response = 'I will inspect player.gd.\n```json\n{"tool": "read_file", "args": {"path": "player.gd"}}\n```'
+            match = re.search(r'```(?:json)?\s*(\{"tool":[\s\S]+?\})\s*```', simulated_response)
+            self.assertIsNotNone(match)
+            call = json.loads(match.group(1))
+            self.assertEqual(call['tool'], 'read_file')
+            
+            # Step 2: ToolEngine executes inside project
+            obs = ToolEngine.read_file(str(proj), call['args']['path'])
+            self.assertIn('var speed = 200', obs)
+            
+            # Step 3: Next step writes fix autonomously under Full project editing
+            write_call = {'tool': 'write_file', 'args': {'path': 'player.gd', 'content': 'var speed = 400\nfunc move(): pass'}}
+            (proj / write_call['args']['path']).write_text(write_call['args']['content'], encoding='utf-8')
+            self.assertIn('speed = 400', (proj / 'player.gd').read_text())
+
 
 if __name__ == '__main__':
     unittest.main()

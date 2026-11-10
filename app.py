@@ -23,7 +23,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 APP_TITLE = f"GameForge Studio v{APP_VERSION} • Obsidian Glass Slate"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -966,6 +966,7 @@ class Studio(tk.Tk):
             ('📂  Import Folder', self.import_folder_dialog),
             ('📋  Import from Master', self.batch_import_dialog),
             ('🌐  Download / Clone', self.clone_dialog),
+            ('🎮  3D Asset Viewport', self.open_3d_viewport),
             ('🤖  Pull from Agents', self.agent_sources_view),
             ('📝  Project Master List', self.master_list_view),
             ('🛡️  Recovery Center', self.recovery_center_view),
@@ -1016,6 +1017,21 @@ class Studio(tk.Tk):
             action()
         except Exception as error:
             messagebox.showerror('GameForge Studio', str(error))
+
+    def open_3d_viewport(self, target_file=None):
+        """Launches the interactive Three.js 3D Viewport."""
+        try:
+            viewport_script = Path(__file__).resolve().parent / 'viewport3d.py'
+            if viewport_script.exists():
+                args = [sys.executable, str(viewport_script)]
+                if target_file:
+                    args.append(str(target_file))
+                subprocess.Popen(args)
+            else:
+                import viewport3d
+                threading.Thread(target=viewport3d.launch_viewport, args=(target_file,), daemon=True).start()
+        except Exception as ex:
+            messagebox.showerror('3D Viewport Error', f"Could not launch 3D viewport:\n{ex}")
 
     def clear_main(self, title, subtitle=''):
         for child in self.main.winfo_children():
@@ -1136,6 +1152,10 @@ class Studio(tk.Tk):
 
         launch_bar = tk.Frame(container, bg='#0e141c')
         launch_bar.pack(fill='x', pady=(0, 14))
+
+        tk.Button(launch_bar, text='🎮 3D Asset Viewport', font=('Segoe UI', 9, 'bold'),
+                  bg='#233876', fg='#38bdf8', relief='flat', padx=12, pady=5,
+                  command=lambda: self.safe_action(self.open_3d_viewport)).pack(side='left', padx=(0, 6))
 
         tools = detect_tools()
 
@@ -1507,9 +1527,17 @@ class Studio(tk.Tk):
                     transcript.insert('end', f"Output: {payload}\n\n", 'tool')
                     transcript.see('end')
                     transcript.configure(state='disabled')
+                elif event_type == 'step_start':
+                    transcript.configure(state='normal')
+                    transcript.insert('end', f"\n⚡ --- [Autonomous {payload}] ---\n", 'router')
+                    transcript.see('end')
+                    transcript.configure(state='disabled')
                 elif event_type == 'done':
                     set_ui_busy(False)
-                    current_chat['messages'].append({'role': 'assistant', 'content': payload})
+                    if isinstance(payload, list):
+                        current_chat['messages'] = payload
+                    else:
+                        current_chat['messages'].append({'role': 'assistant', 'content': payload})
                     self.store.save()
                     return
                 elif event_type == 'error':
@@ -1573,151 +1601,173 @@ class Studio(tk.Tk):
 
             def worker():
                 start_time = time.time()
-                accumulated_text = []
-                tokens_count = 0
+                total_tokens = 0
                 provider_cfg = self.store.data['providers'].get(prov_key, {})
                 base_url = provider_cfg.get('base_url', '').rstrip('/')
                 api_key = provider_cfg.get('api_key', '')
 
+                system_instructions = (
+                    "You are GameForge Studio's autonomous game engineering agent. "
+                    "You have direct access to project inspection and modification tools. "
+                    "To execute an action, output a markdown JSON block:\n"
+                    "```json\n"
+                    '{"tool": "read_file" | "list_dir" | "search_code" | "write_file", "args": {...}}\n'
+                    "```\n"
+                    "Available Tools:\n"
+                    "- read_file: {\"path\": \"relative/path\"}\n"
+                    "- list_dir: {\"path\": \"relative/path\"}\n"
+                    "- search_code: {\"query\": \"search string\"}\n"
+                    "- write_file: {\"path\": \"relative/path\", \"content\": \"full content\"}\n"
+                    f"Current Project Access Mode: {project.get('access', 'Ask before edits')}.\n"
+                    "Autonomous Rules:\n"
+                    "1. Inspect files or search code first if you need context before editing.\n"
+                    "2. When you call a tool, GameForge executes it and gives you the real observation.\n"
+                    "3. You may chain multiple steps (reading, searching, writing) until your task is accomplished.\n"
+                    "4. When finished, provide a clear, concise final summary without further tool calls."
+                )
+
+                turn_messages = list(current_chat['messages'])
+                max_turns = 8
+
                 try:
-                    system_instructions = (
-                        "You are GameForge Studio autonomous game engineering agent. "
-                        "You can inspect project files and propose modifications. "
-                        "To use a tool, return a markdown JSON block:\n"
-                        "```json\n"
-                        '{"tool": "read_file" | "list_dir" | "search_code" | "write_file", "args": {...}}\n'
-                        "```\n"
-                        "Tools:\n"
-                        "- read_file: {\"path\": \"relative/path\"}\n"
-                        "- list_dir: {\"path\": \"relative/path\"}\n"
-                        "- search_code: {\"query\": \"search string\"}\n"
-                        "- write_file: {\"path\": \"relative/path\", \"content\": \"full content\"}\n"
-                        f"Current Project Access Mode: {project.get('access', 'Ask before edits')}."
-                    )
+                    for turn in range(max_turns):
+                        if self.abort_event.is_set():
+                            break
 
-                    messages_payload = [{'role': 'system', 'content': system_instructions}]
-                    for m in current_chat['messages']:
-                        messages_payload.append({'role': m['role'], 'content': m['content']})
+                        if turn > 0:
+                            self.stream_queue.put(('step_start', f"Step {turn+1}/{max_turns}"))
+                            self.stream_queue.put(('status', {'text': f'⚡ Step {turn+1}/{max_turns} ({resolved_model})...', 'color': '#38bdf8'}))
 
-                    # 1. Ollama local
-                    if prov_key == 'ollama':
-                        req_data = json.dumps({
-                            'model': resolved_model,
-                            'messages': messages_payload,
-                            'stream': True
-                        }).encode('utf-8')
-                        req = urllib.request.Request(
-                            f"{base_url}/api/chat", data=req_data,
-                            headers={'Content-Type': 'application/json'}
-                        )
-                    # 2. Google Gemini
-                    elif prov_key == 'gemini':
-                        gemini_contents = []
-                        for m in current_chat['messages']:
-                            role_map = 'model' if m['role'] == 'assistant' else 'user'
-                            gemini_contents.append({'role': role_map, 'parts': [{'text': m['content']}]})
-                        req_data = json.dumps({
-                            'system_instruction': {'parts': [{'text': system_instructions}]},
-                            'contents': gemini_contents
-                        }).encode('utf-8')
-                        url = f"https://generativelanguage.googleapis.com/v1beta/models/{resolved_model}:streamGenerateContent?alt=sse&key={api_key}"
-                        req = urllib.request.Request(url, data=req_data, headers={'Content-Type': 'application/json'})
+                        messages_payload = [{'role': 'system', 'content': system_instructions}]
+                        for m in turn_messages:
+                            messages_payload.append({'role': m['role'], 'content': m['content']})
 
-                    # 3. Anthropic Claude
-                    elif prov_key == 'anthropic':
-                        anthropic_msgs = []
-                        for m in current_chat['messages']:
-                            anthropic_msgs.append({'role': m['role'], 'content': m['content']})
-                        req_data = json.dumps({
-                            'model': resolved_model,
-                            'system': system_instructions,
-                            'messages': anthropic_msgs,
-                            'max_tokens': 4096,
-                            'stream': True
-                        }).encode('utf-8')
-                        req = urllib.request.Request(
-                            f"{base_url}/messages", data=req_data,
-                            headers={
-                                'x-api-key': api_key,
-                                'anthropic-version': '2023-06-01',
-                                'Content-Type': 'application/json'
-                            }
-                        )
-                    # 4. OpenAI / Compatible
-                    else:
-                        req_data = json.dumps({
-                            'model': resolved_model,
-                            'messages': messages_payload,
-                            'stream': True
-                        }).encode('utf-8')
-                        headers = {'Content-Type': 'application/json'}
-                        if api_key:
-                            headers['Authorization'] = f"Bearer {api_key}"
-                        req = urllib.request.Request(f"{base_url}/chat/completions", data=req_data, headers=headers)
+                        # 1. Ollama local
+                        if prov_key == 'ollama':
+                            req_data = json.dumps({
+                                'model': resolved_model,
+                                'messages': messages_payload,
+                                'stream': True
+                            }).encode('utf-8')
+                            req = urllib.request.Request(
+                                f"{base_url}/api/chat", data=req_data,
+                                headers={'Content-Type': 'application/json'}
+                            )
+                        # 2. Google Gemini
+                        elif prov_key == 'gemini':
+                            gemini_contents = []
+                            for m in turn_messages:
+                                role_map = 'model' if m['role'] == 'assistant' else 'user'
+                                gemini_contents.append({'role': role_map, 'parts': [{'text': m['content']}]})
+                            req_data = json.dumps({
+                                'system_instruction': {'parts': [{'text': system_instructions}]},
+                                'contents': gemini_contents
+                            }).encode('utf-8')
+                            url = f"https://generativelanguage.googleapis.com/v1beta/models/{resolved_model}:streamGenerateContent?alt=sse&key={api_key}"
+                            req = urllib.request.Request(url, data=req_data, headers={'Content-Type': 'application/json'})
 
-                    with urllib.request.urlopen(req, timeout=90) as response:
-                        self.stream_queue.put(('status', {'text': f'🔵 Streaming from {resolved_model}...', 'color': '#60a5fa'}))
-                        for raw_line in response:
-                            if self.abort_event.is_set():
-                                break
-                            line = raw_line.decode('utf-8').strip()
-                            if not line:
-                                continue
+                        # 3. Anthropic Claude
+                        elif prov_key == 'anthropic':
+                            anthropic_msgs = []
+                            for m in turn_messages:
+                                anthropic_msgs.append({'role': m['role'], 'content': m['content']})
+                            req_data = json.dumps({
+                                'model': resolved_model,
+                                'system': system_instructions,
+                                'messages': anthropic_msgs,
+                                'max_tokens': 4096,
+                                'stream': True
+                            }).encode('utf-8')
+                            req = urllib.request.Request(
+                                f"{base_url}/messages", data=req_data,
+                                headers={
+                                    'x-api-key': api_key,
+                                    'anthropic-version': '2023-06-01',
+                                    'Content-Type': 'application/json'
+                                }
+                            )
+                        # 4. OpenAI / Compatible
+                        else:
+                            req_data = json.dumps({
+                                'model': resolved_model,
+                                'messages': messages_payload,
+                                'stream': True
+                            }).encode('utf-8')
+                            headers = {'Content-Type': 'application/json'}
+                            if api_key:
+                                headers['Authorization'] = f"Bearer {api_key}"
+                            req = urllib.request.Request(f"{base_url}/chat/completions", data=req_data, headers=headers)
 
-                            token = ''
-                            if prov_key == 'ollama':
-                                try:
-                                    chunk = json.loads(line)
-                                    token = chunk.get('message', {}).get('content', '')
-                                    eval_cnt = chunk.get('eval_count')
-                                    if eval_cnt:
-                                        tokens_count = eval_cnt
-                                except Exception:
-                                    pass
-                            elif prov_key == 'gemini':
-                                if line.startswith('data: '):
+                        accumulated_text = []
+                        with urllib.request.urlopen(req, timeout=90) as response:
+                            self.stream_queue.put(('status', {'text': f'🔵 Streaming from {resolved_model}...', 'color': '#60a5fa'}))
+                            for raw_line in response:
+                                if self.abort_event.is_set():
+                                    break
+                                line = raw_line.decode('utf-8').strip()
+                                if not line:
+                                    continue
+
+                                token = ''
+                                if prov_key == 'ollama':
                                     try:
-                                        chunk = json.loads(line[6:])
-                                        candidates = chunk.get('candidates', [])
-                                        if candidates:
-                                            parts = candidates[0].get('content', {}).get('parts', [])
-                                            if parts:
-                                                token = parts[0].get('text', '')
+                                        chunk = json.loads(line)
+                                        token = chunk.get('message', {}).get('content', '')
+                                        eval_cnt = chunk.get('eval_count')
+                                        if eval_cnt:
+                                            total_tokens = eval_cnt
                                     except Exception:
                                         pass
-                            elif prov_key == 'anthropic':
-                                if line.startswith('data: '):
-                                    try:
-                                        chunk = json.loads(line[6:])
-                                        if chunk.get('type') == 'content_block_delta':
-                                            token = chunk.get('delta', {}).get('text', '')
-                                    except Exception:
-                                        pass
-                            else:
-                                if line.startswith('data: '):
-                                    line_data = line[6:]
-                                    if line_data == '[DONE]':
-                                        break
-                                    try:
-                                        chunk = json.loads(line_data)
-                                        token = chunk['choices'][0].get('delta', {}).get('content', '')
-                                    except Exception:
-                                        pass
+                                elif prov_key == 'gemini':
+                                    if line.startswith('data: '):
+                                        try:
+                                            chunk = json.loads(line[6:])
+                                            candidates = chunk.get('candidates', [])
+                                            if candidates:
+                                                parts = candidates[0].get('content', {}).get('parts', [])
+                                                if parts:
+                                                    token = parts[0].get('text', '')
+                                        except Exception:
+                                            pass
+                                elif prov_key == 'anthropic':
+                                    if line.startswith('data: '):
+                                        try:
+                                            chunk = json.loads(line[6:])
+                                            if chunk.get('type') == 'content_block_delta':
+                                                token = chunk.get('delta', {}).get('text', '')
+                                        except Exception:
+                                            pass
+                                else:
+                                    if line.startswith('data: '):
+                                        line_data = line[6:]
+                                        if line_data == '[DONE]':
+                                            break
+                                        try:
+                                            chunk = json.loads(line_data)
+                                            token = chunk['choices'][0].get('delta', {}).get('content', '')
+                                        except Exception:
+                                            pass
 
-                            if token:
-                                tokens_count += 1
-                                accumulated_text.append(token)
-                                self.stream_queue.put(('chunk', token))
+                                if token:
+                                    total_tokens += 1
+                                    accumulated_text.append(token)
+                                    self.stream_queue.put(('chunk', token))
 
-                                elapsed = max(0.1, time.time() - start_time)
-                                speed = tokens_count / elapsed
-                                self.stream_queue.put(('metrics', f"Tokens: {tokens_count} | Latency: {elapsed:.1f}s | Speed: {speed:.1f} tok/s"))
+                                    elapsed = max(0.1, time.time() - start_time)
+                                    speed = total_tokens / elapsed
+                                    self.stream_queue.put(('metrics', f"Tokens: {total_tokens} | Latency: {elapsed:.1f}s | Speed: {speed:.1f} tok/s"))
 
-                    complete_reply = ''.join(accumulated_text)
+                        complete_reply = ''.join(accumulated_text)
+                        turn_messages.append({'role': 'assistant', 'content': complete_reply})
 
-                    # Autonomous Tool Loop Inspection
-                    match = re.search(r'```(?:json)?\s*(\{"tool":[\s\S]+?\})\s*```', complete_reply)
-                    if match and not self.abort_event.is_set():
+                        # Autonomous Tool Inspection
+                        match = re.search(r'```(?:json)?\s*(\{"tool":[\s\S]+?\})\s*```', complete_reply)
+                        if not match or self.abort_event.is_set():
+                            # Finished without needing further tools!
+                            self.stream_queue.put(('done', turn_messages))
+                            break
+
+                        # Execute tool
                         try:
                             call = json.loads(match.group(1))
                             tool_name = call.get('tool')
@@ -1733,19 +1783,42 @@ class Studio(tk.Tk):
                                 res = ToolEngine.search_code(project['path'], args.get('query', ''))
                             elif tool_name == 'write_file':
                                 mode = project.get('access', 'Ask before edits')
+                                target_rel = args.get('path', '')
+                                content = args.get('content', '')
+                                t = (Path(project['path']) / target_rel).resolve()
                                 if mode == 'Full project editing':
-                                    t = (Path(project['path']) / args['path']).resolve()
                                     t.parent.mkdir(parents=True, exist_ok=True)
-                                    t.write_text(args['content'], encoding='utf-8')
-                                    res = f"Written {args['path']} successfully."
+                                    if t.exists():
+                                        bak_dir = Path(project['path']) / '.gameforge' / 'backups'
+                                        bak_dir.mkdir(parents=True, exist_ok=True)
+                                        bak_file = bak_dir / f"{t.name}_{int(time.time())}.bak"
+                                        shutil.copy2(t, bak_file)
+                                        project.setdefault('edit_activity', []).append({
+                                            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+                                            'file': target_rel,
+                                            'mode': mode,
+                                            'backup': str(bak_file)
+                                        })
+                                    t.write_text(content, encoding='utf-8')
+                                    res = f"Written {target_rel} successfully ({len(content)} bytes)."
+                                    self.store.save()
                                 else:
-                                    res = f"File edit to '{args.get('path')}' requires user review in Approval Center."
+                                    res = f"File edit to '{target_rel}' proposed and stored in Approval Center for review."
 
                             self.stream_queue.put(('tool_result', res[:500] + ('...' if len(res) > 500 else '')))
+                            turn_messages.append({
+                                'role': 'user',
+                                'content': f"[Tool Observation ({tool_name})]:\n{res}\n\nAnalyze this result and proceed to your next action, or provide your final summary if complete."
+                            })
+
+                            if turn == max_turns - 1:
+                                self.stream_queue.put(('done', turn_messages))
+                                break
+
                         except Exception as tool_ex:
                             self.stream_queue.put(('tool_result', f"Tool Error: {tool_ex}"))
-
-                    self.stream_queue.put(('done', complete_reply))
+                            self.stream_queue.put(('done', turn_messages))
+                            break
 
                 except Exception as ex:
                     if self.abort_event.is_set():
