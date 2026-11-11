@@ -122,6 +122,32 @@ class SafetyAndFeaturesTest(unittest.TestCase):
             (proj / write_call['args']['path']).write_text(write_call['args']['content'], encoding='utf-8')
             self.assertIn('speed = 400', (proj / 'player.gd').read_text())
 
+    def test_work_folder_and_master_lists_configuration(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state_dir = Path(temporary) / 'state'
+            store = Store(state_dir)
+            
+            # Verify work_folder, master_list, projects_list are initialized
+            self.assertIn('work_folder', store.data)
+            self.assertIn('master_list', store.data)
+            self.assertIn('projects_list', store.data)
+            
+            # Configure custom work folder and lists
+            custom_work = str(Path(temporary) / 'CustomDev')
+            custom_master = str(Path(temporary) / 'CustomDev' / 'MASTER_PROJECTS.md')
+            custom_projects = str(Path(temporary) / 'CustomDev' / 'PROJECTS.md')
+            
+            store.data['work_folder'] = custom_work
+            store.data['master_list'] = custom_master
+            store.data['projects_list'] = custom_projects
+            store.save()
+            
+            # Reload from disk and verify persistence
+            reloaded = Store(state_dir)
+            self.assertEqual(reloaded.data['work_folder'], custom_work)
+            self.assertEqual(reloaded.data['master_list'], custom_master)
+            self.assertEqual(reloaded.data['projects_list'], custom_projects)
+
 
 if __name__ == '__main__':
     unittest.main()

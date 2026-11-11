@@ -109,7 +109,7 @@ def dark_dialog(title, message='', mode='info'):
     window = tk.Toplevel(parent)
     window.title(title)
     window.configure(bg='#0d131a')
-    window.geometry('680x480' if mode == 'folder' else '640x320')
+    window.geometry('720x520' if mode in ('folder', 'file') else '640x320')
     window.transient(parent)
     result = [None]
 
@@ -126,20 +126,20 @@ def dark_dialog(title, message='', mode='info'):
                  justify='left', bg='#0d131a', fg='#c2d0df').pack(anchor='w', pady=(0, 12))
 
     default_path = str(Path('D:/DEVELOPMENT').resolve()) if Path('D:/DEVELOPMENT').exists() else str(Path.home())
-    value = tk.StringVar(value=default_path if mode == 'folder' else '')
+    value = tk.StringVar(value=default_path if mode in ('folder', 'file') else '')
 
     def finish(answer):
         result[0] = answer
         window.destroy()
 
-    if mode in ('string', 'folder'):
+    if mode in ('string', 'folder', 'file'):
         entry = tk.Entry(content_frame, textvariable=value, bg='#16212e', fg='#e2eaf4',
                          insertbackground='#60a5fa', relief='flat', font=('Segoe UI', 10),
                          highlightthickness=1, highlightbackground='#26374a', highlightcolor='#3b82f6')
         entry.pack(fill='x', ipady=6, pady=(0, 10))
         entry.focus_set()
 
-    if mode == 'folder':
+    if mode in ('folder', 'file'):
         drives_frame = tk.Frame(content_frame, bg='#0d131a')
         drives_frame.pack(fill='x', pady=(0, 6))
         tk.Label(drives_frame, text='Drives:', font=('Segoe UI', 9, 'bold'),
@@ -161,12 +161,20 @@ def dark_dialog(title, message='', mode='info'):
         def refresh(event=None):
             try:
                 curr = Path(value.get().strip() or default_path).resolve()
+                if curr.is_file():
+                    curr = curr.parent
                 folders = sorted([p for p in curr.iterdir() if p.is_dir() and not p.name.startswith('.')],
                                  key=lambda p: p.name.lower())
+                files = []
+                if mode == 'file':
+                    files = sorted([p for p in curr.iterdir() if p.is_file() and not p.name.startswith('.')],
+                                   key=lambda p: p.name.lower())
                 listing.delete(0, 'end')
                 listing.insert('end', '.. [Parent Directory]')
                 for p in folders:
                     listing.insert('end', f'📁 {p.name}')
+                for p in files:
+                    listing.insert('end', f'📄 {p.name}')
             except Exception:
                 listing.delete(0, 'end')
 
@@ -175,13 +183,19 @@ def dark_dialog(title, message='', mode='info'):
                 idx = listing.curselection()[0]
                 item = listing.get(idx)
                 curr = Path(value.get().strip() or default_path).resolve()
+                if curr.is_file():
+                    curr = curr.parent
                 if idx == 0:
                     parent_p = curr.parent
                     value.set(str(parent_p))
-                else:
+                    refresh()
+                elif item.startswith('📁 '):
                     folder_name = item.replace('📁 ', '').strip()
                     value.set(str((curr / folder_name).resolve()))
-                refresh()
+                    refresh()
+                elif item.startswith('📄 '):
+                    file_name = item.replace('📄 ', '').strip()
+                    value.set(str((curr / file_name).resolve()))
 
         listing.bind('<Double-Button-1>', navigate)
         entry.bind('<Return>', refresh)
@@ -196,12 +210,16 @@ def dark_dialog(title, message='', mode='info'):
             if not chosen.is_dir():
                 return
             finish(str(chosen))
+        elif mode == 'file':
+            chosen = Path(value.get().strip()).resolve()
+            finish(str(chosen))
         elif mode == 'string':
             finish(value.get().strip())
         else:
             finish(True)
 
-    ok_btn = tk.Button(buttons_frame, text='Select Folder' if mode == 'folder' else 'OK',
+    btn_text = 'Select Folder' if mode == 'folder' else ('Select File' if mode == 'file' else 'OK')
+    ok_btn = tk.Button(buttons_frame, text=btn_text,
                        font=('Segoe UI', 9, 'bold'), bg='#2b3e55', fg='#e2eaf4',
                        activebackground='#3b5575', relief='flat', padx=16, pady=6,
                        command=accept)
@@ -231,8 +249,11 @@ class simpledialog:
 
 
 class filedialog:
-    askdirectory = staticmethod(lambda title='Select Directory': dark_dialog(
+    askdirectory = staticmethod(lambda title='Select Directory', initialdir=None: dark_dialog(
         title, 'Select or type a directory path:', 'folder'
+    ))
+    askopenfilename = staticmethod(lambda title='Select File', initialdir=None, filetypes=None: dark_dialog(
+        title, 'Select or type a file path (e.g. .md):', 'file'
     ))
 
 
@@ -411,8 +432,16 @@ class Store:
         anthropic_env = os.environ.get('ANTHROPIC_API_KEY') or ''
         fal_env = os.environ.get('FAL_KEY') or ''
 
+        # Discover work folder and master list defaults
+        default_work = 'D:\\DEVELOPMENT' if Path('D:\\DEVELOPMENT').exists() else str(Path.home() / 'DEVELOPMENT')
+        default_master = str(Path(default_work) / 'MASTER_PROJECTS.md')
+        default_projects = str(Path(default_work) / 'PROJECTS.md')
+
         default_state = {
             'projects': [],
+            'work_folder': default_work,
+            'master_list': default_master,
+            'projects_list': default_projects,
             'providers': {
                 'ollama': {'name': 'Ollama (Local)', 'base_url': 'http://127.0.0.1:11434', 'api_key': '', 'model': 'llama3', 'enabled': True},
                 'gemini': {'name': 'Google Gemini', 'base_url': 'https://generativelanguage.googleapis.com/v1beta', 'api_key': gemini_env, 'model': 'gemini-1.5-pro', 'enabled': bool(gemini_env)},
@@ -422,10 +451,9 @@ class Store:
             },
             'active_provider': 'auto',  # 'auto' = intelligent dynamic routing
             'setup': False,
-            'master_list': 'D:\\DEVELOPMENT\\MASTER_PROJECTS.md',
             'agent_sources': [
-                'D:\\DEVELOPMENT\\MASTER_PROJECTS.md',
-                'D:\\DEVELOPMENT\\PROJECTS.md',
+                default_master,
+                default_projects,
                 'D:\\DEVELOPMENT\\Games\\GuildSim\\.cursor\\LIVE_GAPS.md'
             ],
             # Mandatory Connect Invariant: Disabled by default, opt-in per member/project, individual spending caps
@@ -447,6 +475,12 @@ class Store:
         if self.path.exists():
             try:
                 self.data = json.loads(self.path.read_text(encoding='utf-8'))
+                if 'work_folder' not in self.data:
+                    self.data['work_folder'] = default_work
+                if 'master_list' not in self.data:
+                    self.data['master_list'] = default_master
+                if 'projects_list' not in self.data:
+                    self.data['projects_list'] = default_projects
                 if 'providers' not in self.data or isinstance(self.data['providers'], list):
                     self.data['providers'] = default_state['providers']
                 if 'active_provider' not in self.data:
@@ -2438,16 +2472,26 @@ class Studio(tk.Tk):
     # ─────────────────────────────────────────────────────────────────────────
 
     def setup_wizard(self):
-        """Interactive 4-step wizard introducing tools, AI sign-ins, and safety invariants."""
+        """Interactive 4-step wizard introducing tools, AI sign-ins, workspace folders, and safety invariants."""
         win = tk.Toplevel(self)
         win.title('GameForge Studio Setup Wizard')
         win.configure(bg='#070a0e')
-        win.geometry('780x560')
+        win.geometry('820x620')
         win.transient(self)
 
         step = [0]
         tools = detect_tools()
         providers = self.store.data.setdefault('providers', {})
+
+        # Workspace and Master Tracker configuration state
+        default_work = self.store.data.get('work_folder') or ('D:\\DEVELOPMENT' if Path('D:\\DEVELOPMENT').exists() else str(Path.home() / 'DEVELOPMENT'))
+        default_master = self.store.data.get('master_list') or str(Path(default_work) / 'MASTER_PROJECTS.md')
+        default_projects = self.store.data.get('projects_list') or str(Path(default_work) / 'PROJECTS.md')
+
+        work_var = tk.StringVar(value=default_work)
+        master_var = tk.StringVar(value=default_master)
+        proj_var = tk.StringVar(value=default_projects)
+        deploy_rules_var = tk.BooleanVar(value=True)
 
         body = tk.Frame(win, bg='#070a0e', padx=24, pady=18)
         body.pack(fill='both', expand=True)
@@ -2559,20 +2603,137 @@ class Studio(tk.Tk):
                                   command=test_ollama).pack(side='left', padx=8)
 
             elif s == 2:
-                tk.Label(body, text='Step 3 of 4: Master Project Tracker', font=('Segoe UI', 14, 'bold'),
+                # ── Step 3: Workspace Folders & Master Project Lists ──
+                tk.Label(body, text='Step 3 of 4: Workspace Folders & Master Lists', font=('Segoe UI', 14, 'bold'),
                          bg='#070a0e', fg='#60a5fa').pack(anchor='w', pady=(0, 4))
-                tk.Label(body, text='Connect your central master project document to manage your game portfolio:',
-                         font=('Segoe UI', 9), bg='#070a0e', fg='#9db0c4').pack(anchor='w', pady=(0, 14))
+                tk.Label(body, text='Configure where your game development projects live and where your central AI tracking lists should go:',
+                         font=('Segoe UI', 9), bg='#070a0e', fg='#9db0c4').pack(anchor='w', pady=(0, 10))
 
-                detected_master = 'D:\\DEVELOPMENT\\MASTER_PROJECTS.md'
-                has_master = Path(detected_master).exists()
+                paths_scroll = tk.Frame(body, bg='#070a0e')
+                paths_scroll.pack(fill='both', expand=True)
 
-                box = tk.Frame(body, bg='#141c26', padx=14, pady=14)
-                box.pack(fill='x', pady=10)
-                tk.Label(box, text='Detected Location:' if has_master else 'Default Location:',
-                         font=('Segoe UI', 9, 'bold'), bg='#141c26', fg='#60a5fa').pack(anchor='w')
-                tk.Label(box, text=detected_master, font=('Segoe UI', 10),
-                         bg='#141c26', fg='#ffffff' if has_master else '#7e91a6').pack(anchor='w', pady=(4, 0))
+                def update_statuses():
+                    w_path = Path(work_var.get().strip())
+                    if w_path.exists() and w_path.is_dir():
+                        w_status.config(text='🟢 Ready (Folder Exists)', fg='#22c55e')
+                    else:
+                        w_status.config(text='⚪ Will be created', fg='#9db0c4')
+
+                    m_path = Path(master_var.get().strip())
+                    if m_path.exists() and m_path.is_file():
+                        try:
+                            lines_cnt = len(m_path.read_text(encoding='utf-8', errors='ignore').splitlines())
+                            m_status.config(text=f'🟢 Found ({lines_cnt} lines)', fg='#22c55e')
+                        except Exception:
+                            m_status.config(text='🟢 Found on disk', fg='#22c55e')
+                    else:
+                        m_status.config(text='⚪ Will be initialized', fg='#60a5fa')
+
+                    p_path = Path(proj_var.get().strip())
+                    if p_path.exists() and p_path.is_file():
+                        p_status.config(text='🟢 Found on disk', fg='#22c55e')
+                    else:
+                        p_status.config(text='⚪ Will be initialized', fg='#60a5fa')
+
+                # 1. Primary Work Folder
+                box_w = tk.Frame(paths_scroll, bg='#141c26', padx=12, pady=10, highlightthickness=1, highlightbackground='#26374a')
+                box_w.pack(fill='x', pady=4)
+                top_w = tk.Frame(box_w, bg='#141c26')
+                top_w.pack(fill='x')
+                tk.Label(top_w, text='📁 Primary Development / Work Folder:', font=('Segoe UI', 9, 'bold'),
+                         bg='#141c26', fg='#e2eaf4').pack(side='left')
+                w_status = tk.Label(top_w, text='', font=('Segoe UI', 8, 'bold'), bg='#141c26')
+                w_status.pack(side='right')
+
+                row_w = tk.Frame(box_w, bg='#141c26')
+                row_w.pack(fill='x', pady=(6, 2))
+                w_entry = tk.Entry(row_w, textvariable=work_var, font=('Segoe UI', 9),
+                                   bg='#1b2736', fg='#e2eaf4', relief='flat')
+                w_entry.pack(side='left', fill='x', expand=True, padx=(0, 8), ipady=3)
+
+                def browse_work():
+                    d = filedialog.askdirectory(title='Select Development / Work Root Folder', initialdir=work_var.get())
+                    if d:
+                        d = str(Path(d).resolve())
+                        old_w = work_var.get().strip()
+                        work_var.set(d)
+                        # Auto-update tracker paths if they were in old work folder
+                        m_val = master_var.get().strip()
+                        if not m_val or (old_w and m_val.startswith(old_w)):
+                            master_var.set(str(Path(d) / 'MASTER_PROJECTS.md'))
+                        p_val = proj_var.get().strip()
+                        if not p_val or (old_w and p_val.startswith(old_w)):
+                            proj_var.set(str(Path(d) / 'PROJECTS.md'))
+                        update_statuses()
+
+                tk.Button(row_w, text='📁 Browse...', font=('Segoe UI', 8, 'bold'),
+                          bg='#2b3e55', fg='#e2eaf4', relief='flat', padx=12, pady=3,
+                          command=browse_work).pack(side='right')
+
+                # 2. Master Project Tracker (MASTER_PROJECTS.md)
+                box_m = tk.Frame(paths_scroll, bg='#141c26', padx=12, pady=10, highlightthickness=1, highlightbackground='#26374a')
+                box_m.pack(fill='x', pady=4)
+                top_m = tk.Frame(box_m, bg='#141c26')
+                top_m.pack(fill='x')
+                tk.Label(top_m, text='📋 Master Project Tracker (MASTER_PROJECTS.md):', font=('Segoe UI', 9, 'bold'),
+                         bg='#141c26', fg='#e2eaf4').pack(side='left')
+                m_status = tk.Label(top_m, text='', font=('Segoe UI', 8, 'bold'), bg='#141c26')
+                m_status.pack(side='right')
+
+                row_m = tk.Frame(box_m, bg='#141c26')
+                row_m.pack(fill='x', pady=(6, 2))
+                m_entry = tk.Entry(row_m, textvariable=master_var, font=('Segoe UI', 9),
+                                   bg='#1b2736', fg='#e2eaf4', relief='flat')
+                m_entry.pack(side='left', fill='x', expand=True, padx=(0, 8), ipady=3)
+
+                def browse_master():
+                    f = filedialog.askopenfilename(title='Select MASTER_PROJECTS.md File',
+                                                   initialdir=str(Path(master_var.get()).parent) if master_var.get() else work_var.get(),
+                                                   filetypes=[('Markdown Files', '*.md'), ('All Files', '*.*')])
+                    if f:
+                        master_var.set(str(Path(f).resolve()))
+                        update_statuses()
+
+                tk.Button(row_m, text='📄 Browse...', font=('Segoe UI', 8, 'bold'),
+                          bg='#2b3e55', fg='#e2eaf4', relief='flat', padx=12, pady=3,
+                          command=browse_master).pack(side='right')
+
+                # 3. Projects Summary List (PROJECTS.md)
+                box_p = tk.Frame(paths_scroll, bg='#141c26', padx=12, pady=10, highlightthickness=1, highlightbackground='#26374a')
+                box_p.pack(fill='x', pady=4)
+                top_p = tk.Frame(box_p, bg='#141c26')
+                top_p.pack(fill='x')
+                tk.Label(top_p, text='📄 Projects Summary & Scope List (PROJECTS.md):', font=('Segoe UI', 9, 'bold'),
+                         bg='#141c26', fg='#e2eaf4').pack(side='left')
+                p_status = tk.Label(top_p, text='', font=('Segoe UI', 8, 'bold'), bg='#141c26')
+                p_status.pack(side='right')
+
+                row_p = tk.Frame(box_p, bg='#141c26')
+                row_p.pack(fill='x', pady=(6, 2))
+                p_entry = tk.Entry(row_p, textvariable=proj_var, font=('Segoe UI', 9),
+                                   bg='#1b2736', fg='#e2eaf4', relief='flat')
+                p_entry.pack(side='left', fill='x', expand=True, padx=(0, 8), ipady=3)
+
+                def browse_proj():
+                    f = filedialog.askopenfilename(title='Select PROJECTS.md File',
+                                                   initialdir=str(Path(proj_var.get()).parent) if proj_var.get() else work_var.get(),
+                                                   filetypes=[('Markdown Files', '*.md'), ('All Files', '*.*')])
+                    if f:
+                        proj_var.set(str(Path(f).resolve()))
+                        update_statuses()
+
+                tk.Button(row_p, text='📄 Browse...', font=('Segoe UI', 8, 'bold'),
+                          bg='#2b3e55', fg='#e2eaf4', relief='flat', padx=12, pady=3,
+                          command=browse_proj).pack(side='right')
+
+                # Checkbox for AI rules deployment
+                opt_row = tk.Frame(paths_scroll, bg='#070a0e')
+                opt_row.pack(fill='x', pady=(8, 0))
+                tk.Checkbutton(opt_row, text='Deploy universal AI tracking rules (AGENTS.md, .cursorrules) into work folder',
+                               variable=deploy_rules_var, bg='#070a0e', fg='#c2d0df', selectcolor='#141c26',
+                               activebackground='#070a0e', activeforeground='#60a5fa', font=('Segoe UI', 9)).pack(anchor='w')
+
+                update_statuses()
 
             elif s == 3:
                 tk.Label(body, text='Step 4 of 4: Team AI Safety Invariant', font=('Segoe UI', 14, 'bold'),
@@ -2598,6 +2759,61 @@ class Studio(tk.Tk):
         btn_bar.pack(fill='x', side='bottom')
 
         def next_step():
+            if step[0] == 2:
+                # Save chosen work folder and master lists
+                chosen_work = work_var.get().strip() or default_work
+                chosen_master = master_var.get().strip() or default_master
+                chosen_proj = proj_var.get().strip() or default_projects
+
+                self.store.data['work_folder'] = chosen_work
+                self.store.data['master_list'] = chosen_master
+                self.store.data['projects_list'] = chosen_proj
+                self.store.data['agent_sources'] = [chosen_master, chosen_proj]
+
+                try:
+                    Path(chosen_work).mkdir(parents=True, exist_ok=True)
+                    m_path = Path(chosen_master)
+                    if not m_path.exists():
+                        m_path.parent.mkdir(parents=True, exist_ok=True)
+                        m_path.write_text(
+                            "# Master Project Tracker\n\n"
+                            f"Last updated: {datetime.datetime.now().strftime('%Y-%m-%d')}\n"
+                            f"**Home:** `{chosen_work}`\n\n"
+                            "## 1. Recently Active Projects\n\n"
+                            "| Project | Engine / Stack | Last Touched | Path | Focus & Status |\n"
+                            "| :--- | :--- | :--- | :--- | :--- |\n",
+                            encoding='utf-8'
+                        )
+                    p_path = Path(chosen_proj)
+                    if not p_path.exists():
+                        p_path.parent.mkdir(parents=True, exist_ok=True)
+                        p_path.write_text(
+                            "# Projects Catalog\n\n"
+                            "Central inventory of projects and vertical slices.\n\n"
+                            "## Active Games\n",
+                            encoding='utf-8'
+                        )
+                    if deploy_rules_var.get():
+                        agents_f = Path(chosen_work) / 'AGENTS.md'
+                        cursor_f = Path(chosen_work) / '.cursorrules'
+                        gemini_f = Path(chosen_work) / 'GEMINI.md'
+                        rule_content = (
+                            "# AI Instructions & Master Project Tracking Protocol\n\n"
+                            "1. **Always Consult Master Tracker First**: Reference MASTER_PROJECTS.md before modifying any game project.\n"
+                            "2. **Log All Progress**: Record progress, touched files, and next actions into MASTER_PROJECTS.md.\n"
+                            "3. **File Hygiene**: Keep projects inside Games/<ProjectName>/, never loose in root.\n"
+                            "4. **Scope Discipline**: Finish one playable vertical slice at a time.\n"
+                        )
+                        if not agents_f.exists():
+                            agents_f.write_text(rule_content, encoding='utf-8')
+                        if not cursor_f.exists():
+                            cursor_f.write_text(rule_content, encoding='utf-8')
+                        if not gemini_f.exists():
+                            gemini_f.write_text(rule_content, encoding='utf-8')
+                except Exception as ex:
+                    print(f"Notice: file setup: {ex}")
+                self.store.save()
+
             if step[0] < 3:
                 step[0] += 1
                 render_step()
@@ -2781,6 +2997,110 @@ class Studio(tk.Tk):
         tk.Label(rules_box, text=rules_text, font=('Segoe UI', 10), justify='left',
                  bg='#070a0e', fg='#c2d0df').pack(anchor='w')
 
+        # Tab: Work Folders & Master Lists
+        wf_frame = ttk.Frame(tabs)
+        tabs.add(wf_frame, text=' 📁 Work Folders & Lists ')
+        wf_box = tk.Frame(wf_frame, bg='#070a0e', padx=16, pady=14)
+        wf_box.pack(fill='both', expand=True)
+
+        tk.Label(wf_box, text='Workspace Folders & Master Project Tracking Lists', font=('Segoe UI', 11, 'bold'),
+                 bg='#070a0e', fg='#60a5fa').pack(anchor='w', pady=(0, 4))
+        tk.Label(wf_box, text='Configure where your game projects live and which central master tracking files are used across your AI agents:',
+                 font=('Segoe UI', 9), bg='#070a0e', fg='#9db0c4').pack(anchor='w', pady=(0, 12))
+
+        wf_scroll = tk.Frame(wf_box, bg='#070a0e')
+        wf_scroll.pack(fill='both', expand=True)
+
+        # 1. Work Folder
+        card_w = tk.Frame(wf_scroll, bg='#141c26', padx=12, pady=10, highlightthickness=1, highlightbackground='#26374a')
+        card_w.pack(fill='x', pady=4)
+        tk.Label(card_w, text='📁 Primary Development / Work Folder:', font=('Segoe UI', 9, 'bold'),
+                 bg='#141c26', fg='#e2eaf4').pack(anchor='w')
+        r_w = tk.Frame(card_w, bg='#141c26')
+        r_w.pack(fill='x', pady=(6, 2))
+        w_var = tk.StringVar(value=self.store.data.get('work_folder', 'D:\\DEVELOPMENT'))
+        w_ent = tk.Entry(r_w, textvariable=w_var, font=('Segoe UI', 9), bg='#1b2736', fg='#e2eaf4', relief='flat')
+        w_ent.pack(side='left', fill='x', expand=True, padx=(0, 8), ipady=3)
+        def browse_wf():
+            d = filedialog.askdirectory(title='Select Work Root Folder', initialdir=w_var.get())
+            if d:
+                w_var.set(str(Path(d).resolve()))
+        tk.Button(r_w, text='📁 Browse...', font=('Segoe UI', 8, 'bold'), bg='#2b3e55', fg='#e2eaf4',
+                  relief='flat', padx=12, pady=3, command=browse_wf).pack(side='right')
+
+        # 2. Master Project Tracker (MASTER_PROJECTS.md)
+        card_m = tk.Frame(wf_scroll, bg='#141c26', padx=12, pady=10, highlightthickness=1, highlightbackground='#26374a')
+        card_m.pack(fill='x', pady=4)
+        tk.Label(card_m, text='📋 Master Project Tracker (MASTER_PROJECTS.md):', font=('Segoe UI', 9, 'bold'),
+                 bg='#141c26', fg='#e2eaf4').pack(anchor='w')
+        r_m = tk.Frame(card_m, bg='#141c26')
+        r_m.pack(fill='x', pady=(6, 2))
+        m_var = tk.StringVar(value=self.store.data.get('master_list', 'D:\\DEVELOPMENT\\MASTER_PROJECTS.md'))
+        m_ent = tk.Entry(r_m, textvariable=m_var, font=('Segoe UI', 9), bg='#1b2736', fg='#e2eaf4', relief='flat')
+        m_ent.pack(side='left', fill='x', expand=True, padx=(0, 8), ipady=3)
+        def browse_mf():
+            f = filedialog.askopenfilename(title='Select MASTER_PROJECTS.md File',
+                                           initialdir=str(Path(m_var.get()).parent) if m_var.get() else w_var.get(),
+                                           filetypes=[('Markdown Files', '*.md'), ('All Files', '*.*')])
+            if f:
+                m_var.set(str(Path(f).resolve()))
+        tk.Button(r_m, text='📄 Browse...', font=('Segoe UI', 8, 'bold'), bg='#2b3e55', fg='#e2eaf4',
+                  relief='flat', padx=12, pady=3, command=browse_mf).pack(side='right')
+
+        # 3. Projects Summary List (PROJECTS.md)
+        card_p = tk.Frame(wf_scroll, bg='#141c26', padx=12, pady=10, highlightthickness=1, highlightbackground='#26374a')
+        card_p.pack(fill='x', pady=4)
+        tk.Label(card_p, text='📄 Projects Summary & Scope List (PROJECTS.md):', font=('Segoe UI', 9, 'bold'),
+                 bg='#141c26', fg='#e2eaf4').pack(anchor='w')
+        r_p = tk.Frame(card_p, bg='#141c26')
+        r_p.pack(fill='x', pady=(6, 2))
+        p_var = tk.StringVar(value=self.store.data.get('projects_list', 'D:\\DEVELOPMENT\\PROJECTS.md'))
+        p_ent = tk.Entry(r_p, textvariable=p_var, font=('Segoe UI', 9), bg='#1b2736', fg='#e2eaf4', relief='flat')
+        p_ent.pack(side='left', fill='x', expand=True, padx=(0, 8), ipady=3)
+        def browse_pf():
+            f = filedialog.askopenfilename(title='Select PROJECTS.md File',
+                                           initialdir=str(Path(p_var.get()).parent) if p_var.get() else w_var.get(),
+                                           filetypes=[('Markdown Files', '*.md'), ('All Files', '*.*')])
+            if f:
+                p_var.set(str(Path(f).resolve()))
+        tk.Button(r_p, text='📄 Browse...', font=('Segoe UI', 8, 'bold'), bg='#2b3e55', fg='#e2eaf4',
+                  relief='flat', padx=12, pady=3, command=browse_pf).pack(side='right')
+
+        # Action Buttons
+        btn_row = tk.Frame(wf_scroll, bg='#070a0e')
+        btn_row.pack(fill='x', pady=(12, 0))
+
+        def save_paths():
+            self.store.data['work_folder'] = w_var.get().strip()
+            self.store.data['master_list'] = m_var.get().strip()
+            self.store.data['projects_list'] = p_var.get().strip()
+            self.store.data['agent_sources'] = [m_var.get().strip(), p_var.get().strip()]
+            self.store.save()
+            messagebox.showinfo('Saved', 'Workspace and master tracking lists updated successfully.')
+
+        def deploy_universal_rules():
+            save_paths()
+            w_dir = Path(w_var.get().strip())
+            w_dir.mkdir(parents=True, exist_ok=True)
+            rule_text = (
+                "# AI Instructions & Master Project Tracking Protocol\n\n"
+                "1. **Always Consult Master Tracker First**: Reference MASTER_PROJECTS.md before modifying any game project.\n"
+                "2. **Log All Progress**: Record progress, touched files, and next actions into MASTER_PROJECTS.md.\n"
+                "3. **File Hygiene**: Keep projects inside Games/<ProjectName>/, never loose in root.\n"
+                "4. **Scope Discipline**: Finish one playable vertical slice at a time.\n"
+            )
+            (w_dir / 'AGENTS.md').write_text(rule_text, encoding='utf-8')
+            (w_dir / '.cursorrules').write_text(rule_text, encoding='utf-8')
+            (w_dir / 'GEMINI.md').write_text(rule_text, encoding='utf-8')
+            messagebox.showinfo('Rules Deployed', f"Universal AI rules deployed to:\n• {w_dir / 'AGENTS.md'}\n• {w_dir / '.cursorrules'}\n• {w_dir / 'GEMINI.md'}")
+
+        tk.Button(btn_row, text='Save Workspace Paths', font=('Segoe UI', 9, 'bold'),
+                  bg='#2b3e55', fg='#e2eaf4', relief='flat', padx=14, pady=5,
+                  command=save_paths).pack(side='left', padx=(0, 8))
+        tk.Button(btn_row, text='Deploy Multi-AI Rules (AGENTS.md / .cursorrules)', font=('Segoe UI', 9),
+                  bg='#1b2736', fg='#c2d0df', relief='flat', padx=14, pady=5,
+                  command=deploy_universal_rules).pack(side='left')
+
     # ─────────────────────────────────────────────────────────────────────────
     # PROJECT CREATION & IMPORT DIALOGS
     # ─────────────────────────────────────────────────────────────────────────
@@ -2815,7 +3135,8 @@ class Studio(tk.Tk):
         combo = ttk.Combobox(content, textvariable=name_var, values=list(by_name.keys()), font=('Segoe UI', 10))
         combo.pack(fill='x', pady=(0, 10))
 
-        loc_var = tk.StringVar(value='D:\\DEVELOPMENT\\Games')
+        default_games_dir = str(Path(self.store.data.get('work_folder', 'D:\\DEVELOPMENT')) / 'Games')
+        loc_var = tk.StringVar(value=default_games_dir)
         tk.Label(content, text='Target Project Folder:', font=('Segoe UI', 9, 'bold'),
                  bg='#070a0e', fg='#c2d0df').pack(anchor='w', pady=(8, 2))
         loc_entry = tk.Entry(content, textvariable=loc_var, bg='#16212e', fg='#e2eaf4',
