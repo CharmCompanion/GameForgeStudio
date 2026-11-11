@@ -2,7 +2,7 @@
 ; SEE THE DOCUMENTATION FOR DETAILS ON CREATING INNO SETUP SCRIPT FILES!
 
 #define MyAppName "GameForge Studio"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "1.2.0"
 #define MyAppPublisher "CharmCompanion"
 #define MyAppURL "https://github.com/CharmCompanion/GameForgeStudio"
 #define MyAppExeName "GameForgeStudio.exe"
@@ -21,7 +21,7 @@ DisableProgramGroupPage=yes
 LicenseFile=LICENSE
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=Output
-OutputBaseFilename=GameForgeStudio-Setup-v1.1.0
+OutputBaseFilename=GameForgeStudio-Setup-v1.2.0
 SetupIconFile=app.ico
 Compression=lzma
 SolidCompression=yes

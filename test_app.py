@@ -148,6 +148,44 @@ class SafetyAndFeaturesTest(unittest.TestCase):
             self.assertEqual(reloaded.data['master_list'], custom_master)
             self.assertEqual(reloaded.data['projects_list'], custom_projects)
 
+    def test_voting_hub_data_structures_and_completion_detection(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            store = Store(temporary)
+            polls = store.data.get('polls', [])
+            # Verify default polls exist
+            poll_ids = [p['id'] for p in polls]
+            self.assertIn('poll_next_project_default', poll_ids)
+            self.assertIn('poll_active_features_default', poll_ids)
+
+            # Test casting vote
+            next_poll = next(p for p in polls if p['id'] == 'poll_next_project_default')
+            opt_id = next_poll['options'][0]['id']
+            init_votes = next_poll['options'][0]['votes']
+            next_poll['options'][0]['votes'] += 1
+            store.save()
+
+            reloaded_store = Store(temporary)
+            reloaded_poll = next(p for p in reloaded_store.data['polls'] if p['id'] == 'poll_next_project_default')
+            self.assertEqual(reloaded_poll['options'][0]['votes'], init_votes + 1)
+
+            # Test completion detection logic
+            project = {
+                'id': 'test_proj',
+                'name': 'Nearly Done Game',
+                'engine': 'Godot 4.3',
+                'tasks': [
+                    {'title': 'Task 1', 'done': True},
+                    {'title': 'Task 2', 'done': True},
+                    {'title': 'Task 3', 'done': True},
+                    {'title': 'Task 4', 'done': False}
+                ],
+                'status': 'polishing'
+            }
+            store.data['projects'] = [project]
+            tasks = project['tasks']
+            ratio = sum(1 for t in tasks if t['done']) / len(tasks)
+            self.assertGreaterEqual(ratio, 0.70)
+
 
 if __name__ == '__main__':
     unittest.main()

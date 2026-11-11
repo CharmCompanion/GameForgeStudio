@@ -23,7 +23,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 APP_TITLE = f"GameForge Studio v{APP_VERSION} • Obsidian Glass Slate"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -470,7 +470,39 @@ class Store:
                 'total_prompt_tokens': 0,
                 'total_completion_tokens': 0,
                 'total_estimated_cost': 0.0
-            }
+            },
+            'polls': [
+                {
+                    'id': 'poll_next_project_default',
+                    'title': 'Next Game Prototype Pitch',
+                    'category': 'next_project',
+                    'description': 'Current vertical slice is wrapping up! What game should be our primary development focus next?',
+                    'project_context': 'GymIsland',
+                    'created_at': datetime.datetime.now().strftime('%Y-%m-%d'),
+                    'status': 'active',
+                    'options': [
+                        {'id': 'opt_1', 'text': 'Gym Island ($5 Fitness Slice on Steam)', 'votes': 8},
+                        {'id': 'opt_2', 'text': 'Pokeparadise (Godot 4 Creature Care Daycare)', 'votes': 12},
+                        {'id': 'opt_3', 'text': 'Tower of Elrhun (UE 5.8 Dark Fantasy ARPG)', 'votes': 5},
+                        {'id': 'opt_4', 'text': 'GuildSim (Idle / Tactical Guild Manager)', 'votes': 3},
+                    ]
+                },
+                {
+                    'id': 'poll_active_features_default',
+                    'title': 'Active Focus: Priority Features for Current Game',
+                    'category': 'active_feature',
+                    'description': 'Help decide what mechanic, asset polish pass, or system we build next for the active game.',
+                    'project_context': 'Current Active',
+                    'created_at': datetime.datetime.now().strftime('%Y-%m-%d'),
+                    'status': 'active',
+                    'options': [
+                        {'id': 'feat_1', 'text': 'Real-Time Steamworks Leaderboards & Avatars', 'votes': 14},
+                        {'id': 'feat_2', 'text': 'Dynamic Character Muscle Morphs & Visual Growth', 'votes': 11},
+                        {'id': 'feat_3', 'text': 'Island Tropical Environment & Sound FX Polish', 'votes': 6},
+                        {'id': 'feat_4', 'text': 'Mini-game Juice: Combo Multipliers & Particle FX', 'votes': 9},
+                    ]
+                }
+            ]
         }
         if self.path.exists():
             try:
@@ -489,6 +521,8 @@ class Store:
                     self.data['team_ai'] = default_state['team_ai']
                 if 'metrics' not in self.data:
                     self.data['metrics'] = default_state['metrics']
+                if 'polls' not in self.data or not isinstance(self.data['polls'], list):
+                    self.data['polls'] = default_state['polls']
             except Exception:
                 self.data = default_state
         else:
@@ -1001,6 +1035,7 @@ class Studio(tk.Tk):
             ('📋  Import from Master', self.batch_import_dialog),
             ('🌐  Download / Clone', self.clone_dialog),
             ('🎮  3D Asset Viewport', self.open_3d_viewport),
+            ('🗳️  Project & Feature Voting', self.voting_hub_view),
             ('🤖  Pull from Agents', self.agent_sources_view),
             ('📝  Project Master List', self.master_list_view),
             ('🛡️  Recovery Center', self.recovery_center_view),
@@ -1118,21 +1153,33 @@ class Studio(tk.Tk):
 
     def home(self):
         if not self.project:
-            self.clear_main('Welcome to GameForge Studio', 'Select or import a project to get started.')
-            empty_frame = tk.Frame(self.main, bg='#101822', padx=30, pady=30)
-            empty_frame.pack(fill='both', expand=True, pady=20)
-            tk.Label(empty_frame, text='No Active Project Selected',
-                     font=('Segoe UI', 15, 'bold'), bg='#101822', fg='#60a5fa').pack(pady=(0, 10))
-            tk.Label(empty_frame, text='Start by creating a new game project, importing an existing folder,\nor loading your master project document.',
-                     font=('Segoe UI', 10), bg='#101822', fg='#9db0c4').pack(pady=(0, 20))
-            actions_f = tk.Frame(empty_frame, bg='#101822')
-            actions_f.pack()
+            self.clear_main('Welcome to GameForge Studio', 'Select an active project or vote on upcoming projects and active features below.')
+            empty_frame = tk.Frame(self.main, bg='#070a0e')
+            empty_frame.pack(fill='both', expand=True)
+
+            banner = tk.Frame(empty_frame, bg='#101822', padx=18, pady=12, highlightthickness=1, highlightbackground='#1e293b')
+            banner.pack(fill='x', pady=(0, 10))
+
+            tk.Label(banner, text='GameForge Control Center',
+                     font=('Segoe UI', 13, 'bold'), bg='#101822', fg='#60a5fa').pack(anchor='w')
+            tk.Label(banner, text='Start by creating or importing a project, or vote on upcoming projects and mechanics below.',
+                     font=('Segoe UI', 9), bg='#101822', fg='#9db0c4').pack(anchor='w', pady=(2, 8))
+
+            actions_f = tk.Frame(banner, bg='#101822')
+            actions_f.pack(anchor='w')
             tk.Button(actions_f, text='📂 Import Existing Folder', bg='#2b3e55', fg='#e2eaf4',
-                      font=('Segoe UI', 10, 'bold'), relief='flat', padx=16, pady=8,
-                      command=self.import_folder_dialog).pack(side='left', padx=6)
+                      font=('Segoe UI', 9, 'bold'), relief='flat', padx=12, pady=5,
+                      command=self.import_folder_dialog).pack(side='left', padx=(0, 6))
             tk.Button(actions_f, text='📋 Scan Master Projects', bg='#1f2d3d', fg='#c2d0df',
-                      font=('Segoe UI', 10), relief='flat', padx=16, pady=8,
+                      font=('Segoe UI', 9), relief='flat', padx=12, pady=5,
                       command=self.batch_import_dialog).pack(side='left', padx=6)
+            tk.Button(actions_f, text='➕ New Project', bg='#16212e', fg='#60a5fa',
+                      font=('Segoe UI', 9), relief='flat', padx=12, pady=5,
+                      command=self.create_dialog).pack(side='left', padx=6)
+
+            hub_frame = tk.Frame(empty_frame, bg='#070a0e')
+            hub_frame.pack(fill='both', expand=True)
+            self._render_voting_hub_content(hub_frame)
             return
 
         engine_badge = self.project.get('engine', 'Unknown')
@@ -1232,6 +1279,9 @@ class Studio(tk.Tk):
                  bg='#0e141c', fg='#60a5fa').pack(anchor='w', pady=(0, 6))
         grid = tk.Frame(container, bg='#0e141c')
         grid.pack(fill='x', pady=(0, 14))
+
+        # Quick Project & Feature Voting Widget
+        self._render_quick_vote_card(container)
 
         action_buttons = [
             ('📂 Open Folder in Explorer', lambda: os.startfile(self.project['path'])),
@@ -2274,6 +2324,409 @@ class Studio(tk.Tk):
     def create_project_checkpoint(self, project):
         archive = create_checkpoint(project)
         messagebox.showinfo('Checkpoint Created', f'Checkpoint saved successfully:\n{archive}')
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # PROJECT & FEATURE VOTING HUB
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def get_completion_candidates(self):
+        """Returns projects that are >= 70% complete or marked as polishing/gold."""
+        candidates = []
+        for p in self.store.data.get('projects', []):
+            tasks = p.get('tasks', [])
+            total = len(tasks)
+            done = sum(1 for t in tasks if t.get('done'))
+            ratio = (done / total) if total > 0 else 0.0
+            status = p.get('status', 'active').lower()
+            if (total > 0 and ratio >= 0.70) or status in ('polishing', 'completed', 'gold', 'releasing'):
+                candidates.append({
+                    'id': p.get('id'),
+                    'name': p.get('name'),
+                    'engine': p.get('engine', 'Unknown'),
+                    'done': done,
+                    'total': total,
+                    'pct': int(ratio * 100),
+                    'status': status
+                })
+        return candidates
+
+    def voting_hub_view(self):
+        """Main view for the Project & Feature Voting Hub."""
+        self.clear_main('🗳️  Project & Feature Voting Hub',
+                        'Vote on upcoming game prototypes when active projects near completion, or prioritize current features.')
+        self._render_voting_hub_content(self.main)
+
+    def _render_voting_hub_content(self, parent):
+        container = tk.Frame(parent, bg='#070a0e', padx=16, pady=12)
+        container.pack(fill='both', expand=True)
+
+        # 1. Completion Alert Banner (if any project is nearing completion)
+        candidates = self.get_completion_candidates()
+        if candidates:
+            alert_f = tk.Frame(container, bg='#1a1908', highlightthickness=1, highlightbackground='#ca8a04', padx=14, pady=10)
+            alert_f.pack(fill='x', pady=(0, 14))
+            tk.Label(alert_f, text='🏆 PROJECTS REACHING COMPLETION', font=('Segoe UI', 10, 'bold'),
+                     bg='#1a1908', fg='#facc15').pack(anchor='w')
+            desc_text = "The following project(s) are nearing completion (≥70% tasks finished). Cast votes below to decide what prototype to build next!"
+            tk.Label(alert_f, text=desc_text, font=('Segoe UI', 9), bg='#1a1908', fg='#fef08a').pack(anchor='w', pady=(2, 6))
+
+            cand_items_f = tk.Frame(alert_f, bg='#1a1908')
+            cand_items_f.pack(fill='x')
+            for c in candidates:
+                c_lbl = f"• {c['name']} ({c['engine']}) — {c['done']}/{c['total']} tasks complete ({c['pct']}%) [Status: {c['status']}]"
+                tk.Label(cand_items_f, text=c_lbl, font=('Segoe UI', 9, 'bold'), bg='#1a1908', fg='#fef9c3').pack(anchor='w')
+
+        # 2. Top Action Toolbar
+        tb = tk.Frame(container, bg='#0e141c', padx=12, pady=8)
+        tb.pack(fill='x', pady=(0, 14))
+        tk.Button(tb, text='➕ Create New Poll', font=('Segoe UI', 9, 'bold'),
+                  bg='#2563eb', fg='#ffffff', activebackground='#1d4ed8', relief='flat', padx=12, pady=5,
+                  command=self.create_poll_dialog).pack(side='left', padx=(0, 6))
+        tk.Button(tb, text='📋 Copy All Polls (Markdown)', font=('Segoe UI', 9),
+                  bg='#1e293b', fg='#cbd5e1', activebackground='#334155', relief='flat', padx=12, pady=5,
+                  command=self.copy_all_polls_summary).pack(side='left', padx=6)
+        tk.Button(tb, text='🔄 Refresh Voting Hub', font=('Segoe UI', 9),
+                  bg='#16212e', fg='#9db0c4', activebackground='#26374a', relief='flat', padx=10, pady=5,
+                  command=self.voting_hub_view).pack(side='left', padx=6)
+
+    def _get_polls_list(self):
+        """Helper returning polls as a list, regardless of whether store has list or dict."""
+        raw = self.store.data.get('polls', [])
+        if isinstance(raw, list):
+            return raw
+        if isinstance(raw, dict):
+            return list(raw.values())
+        return []
+
+    def _find_poll(self, poll_id):
+        """Finds a poll by its id."""
+        for p in self._get_polls_list():
+            if p.get('id') == poll_id:
+                return p
+        return None
+
+    def _render_voting_hub_content(self, parent):
+        container = tk.Frame(parent, bg='#070a0e', padx=16, pady=12)
+        container.pack(fill='both', expand=True)
+
+        # 1. Completion Alert Banner (if any project is nearing completion)
+        candidates = self.get_completion_candidates()
+        if candidates:
+            alert_f = tk.Frame(container, bg='#1a1908', highlightthickness=1, highlightbackground='#ca8a04', padx=14, pady=10)
+            alert_f.pack(fill='x', pady=(0, 14))
+            tk.Label(alert_f, text='🏆 PROJECTS REACHING COMPLETION', font=('Segoe UI', 10, 'bold'),
+                     bg='#1a1908', fg='#facc15').pack(anchor='w')
+            desc_text = "The following project(s) are nearing completion (≥70% tasks finished). Cast votes below to decide what prototype to build next!"
+            tk.Label(alert_f, text=desc_text, font=('Segoe UI', 9), bg='#1a1908', fg='#fef08a').pack(anchor='w', pady=(2, 6))
+
+            cand_items_f = tk.Frame(alert_f, bg='#1a1908')
+            cand_items_f.pack(fill='x')
+            for c in candidates:
+                c_lbl = f"• {c['name']} ({c['engine']}) — {c['done']}/{c['total']} tasks complete ({c['pct']}%) [Status: {c['status']}]"
+                tk.Label(cand_items_f, text=c_lbl, font=('Segoe UI', 9, 'bold'), bg='#1a1908', fg='#fef9c3').pack(anchor='w')
+
+        # 2. Top Action Toolbar
+        tb = tk.Frame(container, bg='#0e141c', padx=12, pady=8)
+        tb.pack(fill='x', pady=(0, 14))
+        tk.Button(tb, text='➕ Create New Poll', font=('Segoe UI', 9, 'bold'),
+                  bg='#2563eb', fg='#ffffff', activebackground='#1d4ed8', relief='flat', padx=12, pady=5,
+                  command=self.create_poll_dialog).pack(side='left', padx=(0, 6))
+        tk.Button(tb, text='📋 Copy All Polls (Markdown)', font=('Segoe UI', 9),
+                  bg='#1e293b', fg='#cbd5e1', activebackground='#334155', relief='flat', padx=12, pady=5,
+                  command=self.copy_all_polls_summary).pack(side='left', padx=6)
+        tk.Button(tb, text='🔄 Refresh Voting Hub', font=('Segoe UI', 9),
+                  bg='#16212e', fg='#9db0c4', activebackground='#26374a', relief='flat', padx=10, pady=5,
+                  command=self.voting_hub_view).pack(side='left', padx=6)
+
+        # 3. Polls List
+        polls = self._get_polls_list()
+        if not polls:
+            empty_f = tk.Frame(container, bg='#101822', padx=20, pady=30)
+            empty_f.pack(fill='x')
+            tk.Label(empty_f, text='No polls configured yet.', font=('Segoe UI', 11, 'bold'), bg='#101822', fg='#9db0c4').pack()
+            tk.Button(empty_f, text='Create First Poll', font=('Segoe UI', 9, 'bold'), bg='#2563eb', fg='white',
+                      relief='flat', padx=14, pady=6, command=self.create_poll_dialog).pack(pady=10)
+            return
+
+        for poll in sorted(polls, key=lambda p: str(p.get('created_at', '')), reverse=True):
+            self._render_single_poll_card(container, poll.get('id'), poll)
+
+    def _render_single_poll_card(self, parent, poll_id, poll):
+        card = tk.Frame(parent, bg='#101822', highlightthickness=1, highlightbackground='#26374a', padx=14, pady=12)
+        card.pack(fill='x', pady=(0, 12))
+
+        # Header bar
+        hdr = tk.Frame(card, bg='#101822')
+        hdr.pack(fill='x', pady=(0, 6))
+
+        is_active = poll.get('status', 'active') == 'active'
+        status_bg = '#065f46' if is_active else '#374151'
+        status_fg = '#34d399' if is_active else '#9ca3af'
+        status_txt = '● ACTIVE' if is_active else '○ CLOSED'
+        tk.Label(hdr, text=f" {status_txt} ", font=('Segoe UI', 8, 'bold'), bg=status_bg, fg=status_fg).pack(side='right', padx=4)
+
+        cat_txt = poll.get('category', 'General').upper()
+        tk.Label(hdr, text=f" {cat_txt} ", font=('Segoe UI', 8, 'bold'), bg='#1e3a5f', fg='#60a5fa').pack(side='right', padx=4)
+
+        title = poll.get('title', 'Untitled Poll')
+        tk.Label(hdr, text=f"🗳️ {title}", font=('Segoe UI', 11, 'bold'), bg='#101822', fg='#f1f5f9').pack(side='left')
+
+        # Description
+        desc = poll.get('description', '')
+        if desc:
+            tk.Label(card, text=desc, font=('Segoe UI', 9), bg='#101822', fg='#94a3b8', wraplength=700, justify='left').pack(anchor='w', pady=(0, 8))
+
+        # Options list
+        options = poll.get('options', [])
+        total_votes = sum(o.get('votes', 0) for o in options)
+
+        opts_f = tk.Frame(card, bg='#0b1017', padx=10, pady=8)
+        opts_f.pack(fill='x', pady=(0, 8))
+
+        for opt in sorted(options, key=lambda x: x.get('votes', 0), reverse=True):
+            opt_id = opt.get('id')
+            opt_title = opt.get('title') or opt.get('text') or 'Option'
+            votes = opt.get('votes', 0)
+            pct = int((votes / total_votes * 100)) if total_votes > 0 else 0
+
+            row = tk.Frame(opts_f, bg='#0b1017', pady=3)
+            row.pack(fill='x')
+
+            # Left: Option Title
+            tk.Label(row, text=opt_title, font=('Segoe UI', 9, 'bold' if votes > 0 and pct >= 50 else 'normal'),
+                     bg='#0b1017', fg='#e2e8f0', width=32, anchor='w').pack(side='left')
+
+            # Mid: Visual percentage bar
+            bar_container = tk.Frame(row, bg='#1e293b', height=14, width=160)
+            bar_container.pack(side='left', padx=8)
+            bar_container.pack_propagate(False)
+            if pct > 0:
+                bar_fill = tk.Frame(bar_container, bg='#38bdf8' if is_active else '#64748b', width=int(1.6 * pct))
+                bar_fill.pack(side='left', fill='y')
+
+            # Right: Votes and Percentage text
+            tk.Label(row, text=f"{votes} votes ({pct}%)", font=('Segoe UI', 9), bg='#0b1017', fg='#94a3b8', width=14, anchor='w').pack(side='left')
+
+            # +1 Vote Button (if active)
+            if is_active:
+                tk.Button(row, text='👍 +1 Vote', font=('Segoe UI', 8, 'bold'),
+                          bg='#1d4ed8', fg='#ffffff', activebackground='#2563eb', relief='flat', padx=8, pady=2,
+                          command=lambda pid=poll_id, oid=opt_id: self.cast_vote(pid, oid)).pack(side='right')
+
+        # Card Footer: Stats & Actions
+        ftr = tk.Frame(card, bg='#101822')
+        ftr.pack(fill='x', pady=(4, 0))
+
+        tk.Label(ftr, text=f"Total Votes: {total_votes}", font=('Segoe UI', 8, 'bold'), bg='#101822', fg='#64748b').pack(side='left')
+
+        # Action buttons
+        tk.Button(ftr, text='📋 Copy Result', font=('Segoe UI', 8), bg='#1e293b', fg='#cbd5e1', relief='flat', padx=8, pady=2,
+                  command=lambda pid=poll_id: self.copy_poll_summary(pid)).pack(side='right', padx=(4, 0))
+        toggle_txt = '⏸️ Close Poll' if is_active else '▶️ Reopen Poll'
+        tk.Button(ftr, text=toggle_txt, font=('Segoe UI', 8), bg='#1e293b', fg='#cbd5e1', relief='flat', padx=8, pady=2,
+                  command=lambda pid=poll_id: self.toggle_poll_status(pid)).pack(side='right', padx=4)
+        if is_active:
+            tk.Button(ftr, text='➕ Add Option', font=('Segoe UI', 8), bg='#1e293b', fg='#38bdf8', relief='flat', padx=8, pady=2,
+                      command=lambda pid=poll_id: self.add_poll_option_dialog(pid)).pack(side='right', padx=4)
+        tk.Button(ftr, text='🗑️', font=('Segoe UI', 8), bg='#271c1f', fg='#f87171', relief='flat', padx=6, pady=2,
+                  command=lambda pid=poll_id: self.delete_poll(pid)).pack(side='right', padx=4)
+
+    def _render_quick_vote_card(self, parent):
+        """Renders an embedded quick-voting widget in the Home view or Control Center."""
+        polls = self._get_polls_list()
+        if not polls:
+            return
+
+        card = tk.Frame(parent, bg='#101822', highlightthickness=1, highlightbackground='#26374a', padx=14, pady=10)
+        card.pack(fill='x', pady=(0, 12))
+
+        # Check for completion alert
+        candidates = self.get_completion_candidates()
+        if candidates:
+            top_cand = candidates[0]
+            alert_bar = tk.Frame(card, bg='#1c1917', highlightthickness=1, highlightbackground='#eab308', padx=8, pady=4)
+            alert_bar.pack(fill='x', pady=(0, 8))
+            tk.Label(alert_bar, text=f"🏆 Milestone Alert: {top_cand['name']} is {top_cand['pct']}% complete! Time to vote on what's next.",
+                     font=('Segoe UI', 8, 'bold'), bg='#1c1917', fg='#fde047').pack(side='left')
+
+        # Header
+        hdr = tk.Frame(card, bg='#101822')
+        hdr.pack(fill='x', pady=(0, 6))
+        tk.Label(hdr, text='🗳️ Active Community & Prototype Voting', font=('Segoe UI', 10, 'bold'), bg='#101822', fg='#60a5fa').pack(side='left')
+        tk.Button(hdr, text='Open Full Voting Hub →', font=('Segoe UI', 8, 'bold'), bg='#1e3a5f', fg='#93c5fd', relief='flat', padx=8, pady=2,
+                  command=self.voting_hub_view).pack(side='right')
+
+        # Pick a featured active poll (prefer 'next_project' if reaching completion, or the first active one)
+        featured = None
+        if candidates:
+            featured = next((p for p in polls if p.get('category') == 'next_project'), None)
+        if not featured:
+            featured = next((p for p in polls if p.get('status') == 'active'), polls[0])
+
+        target_poll_id = featured.get('id')
+        tk.Label(card, text=featured.get('title', ''), font=('Segoe UI', 9, 'bold'), bg='#101822', fg='#f1f5f9').pack(anchor='w')
+
+        opts = featured.get('options', [])
+        total_votes = sum(o.get('votes', 0) for o in opts)
+        is_active = featured.get('status') == 'active'
+
+        opts_row = tk.Frame(card, bg='#0b1017', padx=8, pady=6)
+        opts_row.pack(fill='x', pady=(4, 0))
+
+        # Show top 3 options
+        for opt in sorted(opts, key=lambda x: x.get('votes', 0), reverse=True)[:3]:
+            opt_f = tk.Frame(opts_row, bg='#0b1017', pady=2)
+            opt_f.pack(fill='x')
+            opt_txt = opt.get('title') or opt.get('text') or 'Option'
+            tk.Label(opt_f, text=f"• {opt_txt}", font=('Segoe UI', 8), bg='#0b1017', fg='#cbd5e1').pack(side='left')
+            votes = opt.get('votes', 0)
+            pct = int((votes / total_votes * 100)) if total_votes > 0 else 0
+            tk.Label(opt_f, text=f"{votes} votes ({pct}%)", font=('Segoe UI', 8), bg='#0b1017', fg='#64748b').pack(side='left', padx=6)
+            if is_active:
+                tk.Button(opt_f, text='+1', font=('Segoe UI', 7, 'bold'), bg='#2563eb', fg='white', relief='flat', padx=6,
+                          command=lambda pid=target_poll_id, oid=opt.get('id'): self.cast_vote(pid, oid)).pack(side='right')
+
+    def cast_vote(self, poll_id, option_id):
+        """Cast a vote for an option in a poll and refresh UI."""
+        poll = self._find_poll(poll_id)
+        if not poll:
+            return
+        if poll.get('status') != 'active':
+            messagebox.showinfo('Poll Closed', 'This poll is currently closed for voting.')
+            return
+        for opt in poll.get('options', []):
+            if opt.get('id') == option_id:
+                opt['votes'] = opt.get('votes', 0) + 1
+                break
+        self.store.save()
+        self.refresh()
+        self.voting_hub_view()
+
+    def toggle_poll_status(self, poll_id):
+        """Toggle a poll between active and closed."""
+        poll = self._find_poll(poll_id)
+        if poll:
+            cur = poll.get('status', 'active')
+            poll['status'] = 'closed' if cur == 'active' else 'active'
+            self.store.save()
+            self.refresh()
+            self.voting_hub_view()
+
+    def delete_poll(self, poll_id):
+        """Delete a poll with confirmation."""
+        poll = self._find_poll(poll_id)
+        if poll:
+            if messagebox.askyesno('Confirm Delete', f"Are you sure you want to delete the poll:\n'{poll.get('title')}'?"):
+                raw = self.store.data.get('polls')
+                if isinstance(raw, list):
+                    self.store.data['polls'] = [p for p in raw if p.get('id') != poll_id]
+                elif isinstance(raw, dict) and poll_id in raw:
+                    del raw[poll_id]
+                self.store.save()
+                self.refresh()
+                self.voting_hub_view()
+
+    def add_poll_option_dialog(self, poll_id):
+        """Prompt to add a new option to an existing poll."""
+        title = simpledialog.askstring('Add Option', 'Enter title for candidate or feature:')
+        if not title or not title.strip():
+            return
+        poll = self._find_poll(poll_id)
+        if poll:
+            new_id = f"opt_{len(poll.get('options', [])) + 1}_{int(time.time())}"
+            poll.setdefault('options', []).append({
+                'id': new_id,
+                'title': title.strip(),
+                'votes': 0
+            })
+            self.store.save()
+            self.refresh()
+            self.voting_hub_view()
+
+    def create_poll_dialog(self):
+        """Dialog to create a new poll."""
+        title = simpledialog.askstring('New Poll Title', 'Enter title for the poll:')
+        if not title or not title.strip():
+            return
+        desc = simpledialog.askstring('Poll Description', 'Enter short description (optional):') or ''
+        raw_options = simpledialog.askstring('Options', 'Enter options separated by commas:\n(e.g. Option A, Option B, Option C)')
+        if not raw_options or not raw_options.strip():
+            options_list = ['Candidate Prototype A', 'Candidate Prototype B']
+        else:
+            options_list = [o.strip() for o in raw_options.split(',') if o.strip()]
+
+        poll_id = f"poll_{int(time.time())}"
+        new_poll = {
+            'id': poll_id,
+            'title': title.strip(),
+            'description': desc.strip(),
+            'category': 'Custom',
+            'status': 'active',
+            'created_at': datetime.now().isoformat(),
+            'options': [{'id': f"opt_{i+1}", 'title': name, 'votes': 0} for i, name in enumerate(options_list)]
+        }
+        raw = self.store.data.setdefault('polls', [])
+        if isinstance(raw, list):
+            raw.append(new_poll)
+        elif isinstance(raw, dict):
+            raw[poll_id] = new_poll
+        self.store.save()
+        self.refresh()
+        self.voting_hub_view()
+
+    def copy_poll_summary(self, poll_id):
+        """Copies markdown formatted results for a poll to clipboard."""
+        p = self._find_poll(poll_id)
+        if not p:
+            return
+        total = sum(o.get('votes', 0) for o in p.get('options', []))
+        lines = [
+            f"### 🗳️ {p.get('title')}",
+            f"*{p.get('description', '')}*",
+            f"**Status:** {p.get('status', 'active').upper()} | **Total Votes:** {total}",
+            "",
+            "| Option | Votes | % |",
+            "|---|---|---|"
+        ]
+        for opt in sorted(p.get('options', []), key=lambda x: x.get('votes', 0), reverse=True):
+            opt_title = opt.get('title') or opt.get('text') or 'Option'
+            votes = opt.get('votes', 0)
+            pct = int((votes / total * 100)) if total > 0 else 0
+            lines.append(f"| {opt_title} | {votes} | {pct}% |")
+        md = "\n".join(lines)
+        self.clipboard_clear()
+        self.clipboard_append(md)
+        messagebox.showinfo('Copied to Clipboard', f"Markdown summary for '{p.get('title')}' copied to clipboard!")
+
+    def copy_all_polls_summary(self):
+        """Copies all active polls summary to clipboard in Markdown format."""
+        polls = self._get_polls_list()
+        if not polls:
+            messagebox.showinfo('No Polls', 'No polls available to export.')
+            return
+        lines = ["# 🎮 GameForge Studio Community & Prototype Polls", ""]
+        candidates = self.get_completion_candidates()
+        if candidates:
+            lines.append("## 🏆 Projects Nearing Completion")
+            for c in candidates:
+                lines.append(f"- **{c['name']}** ({c['engine']}): {c['done']}/{c['total']} tasks ({c['pct']}%)")
+            lines.append("")
+        for p in polls:
+            total = sum(o.get('votes', 0) for o in p.get('options', []))
+            lines.append(f"### 🗳️ {p.get('title')} [{p.get('category', 'General').upper()}]")
+            if p.get('description'):
+                lines.append(f"*{p.get('description')}*")
+            lines.append(f"Status: {p.get('status').upper()} • Total Votes: {total}\n")
+            for opt in sorted(p.get('options', []), key=lambda x: x.get('votes', 0), reverse=True):
+                opt_title = opt.get('title') or opt.get('text') or 'Option'
+                votes = opt.get('votes', 0)
+                pct = int((votes / total * 100)) if total > 0 else 0
+                lines.append(f"- **{opt_title}**: {votes} votes ({pct}%)")
+            lines.append("")
+        md = "\n".join(lines)
+        self.clipboard_clear()
+        self.clipboard_append(md)
+        messagebox.showinfo('Copied to Clipboard', 'All voting polls copied to clipboard in Markdown format!')
 
     # ─────────────────────────────────────────────────────────────────────────
     # MULTI-AGENT SYNCER (Pull from Agents)
